@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ReactFlow, ReactFlowProvider, Background, BackgroundVariant, ConnectionMode, MarkerType, Panel, SelectionMode, applyNodeChanges, useReactFlow, type Connection, type Edge, type NodeChange, type Viewport } from '@xyflow/react';
@@ -17,6 +17,7 @@ import Modal from './modal';
 
 const nodeTypes = { shape: ShapeNode };
 const edgeTypes = { routed: RoutedEdge };
+const SHAPE_DRAG_TYPE = 'application/x-flowchart-studio-shape';
 function portableNode(n: DiagramNode, selected = false): FlowNode { return { id: n.id, type: 'shape', position: n.position, width: n.width, height: n.height, data: { model: n }, selected, ariaLabel: `${NODE_TYPE_LABELS[n.type]}: ${n.label || 'Untitled'}` }; }
 function growLabel(node: DiagramNode, label: string): DiagramNode {
   let width = node.width;
@@ -38,6 +39,8 @@ function Workspace() {
   const [selectedEdges, setSelectedEdges] = useState<string[]>([]);
   const [modal, setModal] = useState<'documents' | 'help' | 'connection' | 'delete' | null>(null);
   const [palette, setPalette] = useState(false);
+  const [dropReady, setDropReady] = useState(false);
+  const paletteDrag = useRef<{ kind: NodeKind; documentId: string } | null>(null);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState('');
   const [zoom, setZoom] = useState(1);
@@ -117,15 +120,26 @@ function Workspace() {
     return () => window.removeEventListener('keydown', key);
   });
 
-  const addNode = (kind: NodeKind) => {
-    if (!doc || readonly || !canvas.current) return;
+  const addNode = (kind: NodeKind, dropPoint?: { x: number; y: number }) => {
+    const current = store.current.current?.present;
+    if (!current || readonly || !canvas.current) return;
     const rect = canvas.current.getBoundingClientRect();
-    const point = flow.screenToFlowPosition({ x: rect.left + rect.width / 2 - 90, y: rect.top + rect.height / 2 - 40 });
-    const snap = (v: number) => doc.settings.snapToGrid ? Math.round(v / 16) * 16 : Math.round(v);
-    let position = { x: snap(point.x), y: snap(point.y) };
-    while (doc.nodes.some(n => Math.abs(n.position.x - position.x) < 20 && Math.abs(n.position.y - position.y) < 20)) position = { x: position.x + 32, y: position.y + 32 };
-    const node = createNode(kind, position);
-    commit({ ...doc, nodes: [...doc.nodes, node] }); select([node.id], []); setPalette(false);
+    const point = flow.screenToFlowPosition(dropPoint ?? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, { snapToGrid: false });
+    const node = createNode(kind, { x: 0, y: 0 });
+    const snap = (v: number) => current.settings.snapToGrid ? Math.round(v / 16) * 16 : v;
+    let position = { x: snap(point.x - node.width / 2), y: snap(point.y - node.height / 2) };
+    if (!dropPoint) while (current.nodes.some(n => Math.abs(n.position.x - position.x) < 20 && Math.abs(n.position.y - position.y) < 20)) position = { x: position.x + 32, y: position.y + 32 };
+    commit({ ...current, nodes: [...current.nodes, { ...node, position }] }); select([node.id], []); setPalette(false);
+  };
+  const clearPaletteDrag = () => { paletteDrag.current = null; setDropReady(false); };
+  const canDropShape = (event: DragEvent<HTMLElement>) => !readonly && paletteDrag.current?.documentId === store.current.current?.present.documentId && event.dataTransfer.types.includes(SHAPE_DRAG_TYPE);
+  const dropShape = (event: DragEvent<HTMLElement>) => {
+    if (!canDropShape(event)) return;
+    event.preventDefault();
+    const kind = paletteDrag.current!.kind;
+    const matches = event.dataTransfer.getData(SHAPE_DRAG_TYPE) === kind;
+    clearPaletteDrag();
+    if (matches) addNode(kind, { x: event.clientX, y: event.clientY });
   };
   const connect = (connection: Connection, label = '') => {
     const d = store.current.current?.present;
@@ -197,13 +211,22 @@ function Workspace() {
     {store.error && <div className="error-banner" role="alert"><span>{store.error}</span><div>{(store.status === 'error' || store.readonly) && <><button onClick={() => void store.saveCopy()} disabled={store.busy}>Save a separate copy</button><button onClick={exportJSON}>Download JSON</button></>}{store.status === 'error' && <button onClick={() => void store.save()}>Retry save</button>}{store.status !== 'error' && !store.readonly && <button aria-label="Dismiss error" onClick={() => store.setError('')}><X size={16} /></button>}</div></div>}
     <div className="editor-body">
       <aside className={`shape-palette ${palette ? 'palette-open' : ''}`} aria-label="Shapes">
-        <div className="panel-title"><h2>Shapes</h2><span>Click to add</span></div>
-        <div className="shape-options">{NODE_TYPES.map(kind => <button key={kind} className="shape-option" aria-label={`Add ${NODE_TYPE_LABELS[kind]}`} onClick={() => addNode(kind)} disabled={readonly}>
+        <div className="panel-title"><h2>Shapes</h2><span>Click or drag</span></div>
+        <div className="shape-options">{NODE_TYPES.map(kind => <button key={kind} className="shape-option" aria-label={`Add ${NODE_TYPE_LABELS[kind]}`} onClick={() => addNode(kind)} disabled={readonly} draggable={!readonly}
+          onDragStart={event => {
+            if (readonly) { event.preventDefault(); return; }
+            paletteDrag.current = { kind, documentId: doc.documentId };
+            event.dataTransfer.setData(SHAPE_DRAG_TYPE, kind);
+            event.dataTransfer.effectAllowed = 'copy';
+          }} onDragEnd={clearPaletteDrag}>
           <svg width="44" height="30" viewBox="-2 -2 84 54" aria-hidden="true"><path d={nodePath(kind, 80, 50)} fill="white" stroke="currentColor" strokeWidth="2" /></svg><span>{NODE_TYPE_LABELS[kind]}</span>
         </button>)}</div>
         <div className="palette-bottom"><button className="button" disabled={readonly} onClick={async () => { await store.add(exampleDiagram()); select([], []); }}><FilePlus2 size={16} />Programming example</button><p>Drag between connection points to link shapes.</p></div>
       </aside>
-      <section ref={canvas} className="canvas" aria-label="Diagram canvas">
+      <section ref={canvas} className={`canvas${dropReady && !readonly ? ' canvas-drop-ready' : ''}`} aria-label="Diagram canvas"
+        onDragOver={event => { if (canDropShape(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setDropReady(true); } }}
+        onDragLeave={event => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDropReady(false); }}
+        onDrop={dropShape}>
         <ReactFlow<FlowNode> nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={changes => { for (const change of changes) if (change.type === 'select') setSelectedEdges(prev => change.selected ? [...new Set([...prev, change.id])] : prev.filter(id => id !== change.id)); }}
           onSelectionChange={onSelectionChange}
           onConnect={connection => connect(connection)} onReconnect={(old, connection) => updateEdge(old.id, { source: connection.source, target: connection.target, sourceHandle: (connection.sourceHandle as HandleId) ?? 'bottom', targetHandle: (connection.targetHandle as HandleId) ?? 'top' })}
@@ -230,7 +253,7 @@ function Workspace() {
       </aside>}
     </div>
     <footer className="editor-footer"><span>{doc.nodes.length} shapes<span className="footer-dot">·</span>{doc.edges.length} connections</span><span className="footer-notice" aria-live="polite">{notice}</span><button className="text-button" onClick={() => setModal('help')}>Local storage & help</button></footer>
-    {modal === 'help' && <Modal title="Help" onClose={() => setModal(null)}><div className="help-content"><h3>Drawing</h3><p>Click a shape to add it. Drag shapes to move them. Click a label to select its shape and edit it in Properties. Changes apply when you leave the field.</p><p>Drag between connection points, or use Connect nodes to choose endpoints and labels. Multiple branches, merges, and multi-node loops work. Same-node loops are not supported.</p><h3>Canvas and keyboard</h3><p>Use the mouse wheel to zoom. Hold Space and drag, or use the middle/right mouse button, to pan. Drag on empty canvas to select a group. Shift + click adds to a selection. Focus a shape and use arrow keys to move it.</p><dl className="shortcuts"><dt>Undo / redo</dt><dd>⌘/Ctrl Z / Shift Z</dd><dt>Duplicate</dt><dd>⌘/Ctrl D</dd><dt>Select all</dt><dd>⌘/Ctrl A</dd><dt>Delete selection</dt><dd>Delete / Backspace</dd></dl><h3>Local files</h3><p>Diagrams save in this browser on this device. Clearing browser data or storage eviction can remove them. Export JSON for an editable backup; import always creates a new document. PNG includes the whole diagram.</p><p>Editing and saving continue if you disconnect after loading. Reopening offline is not supported yet. Nothing in a diagram is uploaded.</p><Link href="/privacy" target="_blank">Privacy and storage details</Link></div></Modal>}
+    {modal === 'help' && <Modal title="Help" onClose={() => setModal(null)}><div className="help-content"><h3>Drawing</h3><p>Click a sidebar shape to add it, or drag it onto the canvas to place it. Drag canvas shapes to move them. Click a label to select its shape and edit it in Properties. Changes apply when you leave the field.</p><p>Drag between connection points, or use Connect nodes to choose endpoints and labels. Multiple branches, merges, and multi-node loops work. Same-node loops are not supported.</p><h3>Canvas and keyboard</h3><p>Use the mouse wheel to zoom. Hold Space and drag, or use the middle/right mouse button, to pan. Drag on empty canvas to select a group. Shift + click adds to a selection. Focus a shape and use arrow keys to move it.</p><dl className="shortcuts"><dt>Undo / redo</dt><dd>⌘/Ctrl Z / Shift Z</dd><dt>Duplicate</dt><dd>⌘/Ctrl D</dd><dt>Select all</dt><dd>⌘/Ctrl A</dd><dt>Delete selection</dt><dd>Delete / Backspace</dd></dl><h3>Local files</h3><p>Diagrams save in this browser on this device. Clearing browser data or storage eviction can remove them. Export JSON for an editable backup; import always creates a new document. PNG includes the whole diagram.</p><p>Editing and saving continue if you disconnect after loading. Reopening offline is not supported yet. Nothing in a diagram is uploaded.</p><Link href="/privacy" target="_blank">Privacy and storage details</Link></div></Modal>}
     {modal === 'documents' && <Modal title="Documents" onClose={() => setModal(null)}><div className="document-actions"><button className="button button-dark" disabled={store.busy} onClick={async () => { await store.add(newDiagram()); setModal(null); }}><Plus size={16} />New diagram</button><button className="button" disabled={store.busy} onClick={async () => { await store.saveCopy(); setModal(null); }}>Duplicate document</button><button className="button danger" disabled={readonly} onClick={() => setModal('delete')}>Delete document</button></div><p className="storage-copy">Saved in this browser. Keep JSON backups before clearing browser data.</p><ul className="document-list">{store.documents.map(d => <li key={d.documentId}><button className={d.documentId === doc.documentId ? 'current-document' : ''} disabled={store.busy} onClick={async () => { await store.switchTo(d.documentId); setModal(null); }}><Files size={18} /><span><strong>{d.title}</strong><small>{d.nodes.length} shapes · {new Date(d.updatedAt).toLocaleDateString()}</small></span>{d.documentId === doc.documentId && <Check size={16} />}</button></li>)}</ul><button className="button" onClick={() => { setModal(null); setTimeout(() => document.querySelector<HTMLInputElement>('[aria-label="Diagram title"]')?.focus(),0); }} disabled={readonly}>Rename current document</button></Modal>}
     {modal === 'delete' && <Modal title="Delete document" onClose={() => setModal(null)}><p>Delete “{doc.title}” from this device? This cannot be undone. Download JSON first if you want a backup.</p><div className="dialog-actions"><button className="button" onClick={exportJSON}>Download JSON</button><button className="button" onClick={() => setModal(null)}>Cancel</button><button className="button button-dark" disabled={store.busy} onClick={async () => { await store.remove(); setModal(null); }}>Delete permanently</button></div></Modal>}
     {modal === 'connection' && <Modal title="Connect nodes" onClose={() => setModal(null)}><form className="connection-form" onSubmit={e => { e.preventDefault(); if (connectionDraft.source === connectionDraft.target) return; connect(connectionDraft, connectionDraft.label); setModal(null); }}>

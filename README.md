@@ -26,7 +26,7 @@ Browser tests require Playwright’s Chromium and WebKit browsers (`npx playwrig
 
 ## Implemented
 
-- Immediate guest canvas; six shapes; multiline labels and notes; five color choices.
+- Immediate guest canvas; click or drag any of the six sidebar shapes onto the canvas; multiline labels and notes; five color choices.
 - Pan, zoom, fit, grid and snapping; multi-selection; duplicate/delete; directed labeled connections, merges and multi-node loops. Reconnect by dragging an endpoint or changing its node/handle in Properties.
 - Undo/redo for completed edits and movement; keyboard select all, duplicate and delete, with text-field focus respected.
 - New, rename, duplicate, delete-confirmation and a device-local document list. Autosave restores the last document, checks revisions across tabs, and preserves work on storage failure.
@@ -75,7 +75,7 @@ Phase 3 adds local editor tools: search, alignment and resizing, more shapes, au
 Verified on November 2, 2026 using macOS arm64, Node.js 22.23.4, Next.js 16.4.4, Chromium 156.0.8078.4 and Playwright WebKit 27.2. Browsers tested the local production build, without external API keys.
 
 - `npm run typecheck`, `npm run lint`, `npm test`, and the production build pass. Unit tests: 31 passed across serialization/validation, history, IndexedDB conflicts/failures, and export geometry.
-- Browser tests: all 40 cases have passing evidence across focused runs (20 per engine). Initial issues were corrected and the affected cases rerun. Coverage includes guest editing, node movement and connectors, delete/undo restoring incident edges, text-focus shortcuts, document switching/reload, fresh-context JSON round trips, invalid imports, actual offscreen PNG pixels, simultaneous-tab conflicts, unavailable/quota-limited storage, offline editing, 200-node editing, and example reload recovery.
+- Browser tests: all 48 cases have passing evidence across focused runs (24 per engine). Initial issues were corrected and the affected cases rerun. Coverage includes guest editing, node movement and connectors, delete/undo restoring incident edges, text-focus shortcuts, document switching/reload, fresh-context JSON round trips, invalid imports, actual offscreen PNG pixels, simultaneous-tab conflicts, unavailable/quota-limited storage, offline editing, 200-node editing, example reload recovery, and native sidebar drag-and-drop. The eight sidebar-drag checks cover exact drop coordinates under pan/zoom, grid on/off, one-step undo/redo, reload persistence, cancellation, click/keyboard addition, and read-only protection.
 - Public HTML works with JavaScript disabled; metadata, free-only structured data, robots and the two sitemap entries agree. Instrumented editing and JSON export made zero HTTP requests after loading. Both engines passed automated axe checks with no serious/critical WCAG A/AA violations in the public page, Documents dialog and selected-node editor. Mobile checks at 390×844 passed collapsible controls, no horizontal overflow, and Help keyboard-focus restoration. Automated checks do not establish complete accessibility conformance.
 - One unthrottled local Chromium timing sample at 1440×1000: homepage LCP 116 ms, CLS 0, load 147 ms, 137,019 encoded JavaScript bytes. Importing/rendering a connected 200-node/199-edge diagram took 109 ms; adding/rendering node 201 took 158 ms. These are single local observations, not scores or production/low-end-device benchmarks.
 

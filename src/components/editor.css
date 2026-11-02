@@ -6,3 +6,5 @@
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 
 .canvas .react-flow__attribution a{color:#606060}
+
+.shape-option[draggable=true]{cursor:grab;user-select:none}.shape-option[draggable=true]:active{cursor:grabbing}.canvas-drop-ready:after{content:"";position:absolute;inset:5px;border:1px dashed #555;border-radius:4px;pointer-events:none;z-index:5}
