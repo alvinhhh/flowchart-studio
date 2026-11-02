@@ -184,3 +184,87 @@ describe('local automatic layout', () => {
     await expect(autoArrange(invalid)).rejects.toThrow(/finite/);
   });
 });
+
+
+describe('grouped and locked automatic layout', () => {
+  it('keeps locked shapes exact and places editable shapes clear of fixed obstacles', async () => {
+    const original = branchingGraph();
+    original.nodes[1].locked = true;
+    original.nodes[1].position = { x: 60, y: 180 };
+    const result = await autoArrange(original);
+    expect(result.nodes[1]).toEqual(original.nodes[1]);
+    expect(result.edges.find(edge => edge.id === 'entry')!.targetHandle).toBe(original.edges.find(edge => edge.id === 'entry')!.targetHandle);
+    expect(result.nodes.some((node, index) => !node.locked && node.position.x !== original.nodes[index].position.x)).toBe(true);
+    assertNoOverlap(result);
+    expect(await autoArrange(result)).toEqual(result);
+    expect(await autoArrange(original)).toEqual(result);
+  });
+
+  it('moves a wide group as one unit and translates its internal bends without changing its content', async () => {
+    const first = { ...node('first'), position: { x: -600, y: -300 }, groupId: 'wide-group' };
+    const second = { ...node('second'), position: { x: 2200, y: 140 }, groupId: 'wide-group' };
+    const last = { ...node('last'), position: { x: 0, y: 0 } };
+    const internal = { ...edge('internal', first.id, second.id), waypoints: [{ x: -300, y: -100 }, { x: 2000, y: 200 }] };
+    const external = { ...edge('external', second.id, last.id), waypoints: [{ x: 2500, y: 500 }] };
+    const original = { ...newDiagram(), nodes: [first, second, last], edges: [internal, external] };
+    const before = structuredClone(original);
+    const result = await autoArrange(original);
+    const dx = result.nodes[0].position.x - first.position.x, dy = result.nodes[0].position.y - first.position.y;
+    expect(result.nodes[1].position).toEqual({ x: second.position.x + dx, y: second.position.y + dy });
+    expect(result.edges[0]).toEqual({ ...internal, waypoints: internal.waypoints.map(point => ({ x: point.x + dx, y: point.y + dy })) });
+    expect(result.edges[1]).not.toHaveProperty('waypoints');
+    expect(result.nodes.map(node => ({ ...node, position: undefined }))).toEqual(original.nodes.map(node => ({ ...node, position: undefined })));
+    expect(original).toEqual(before);
+    expect(await autoArrange(result)).toEqual(result);
+    assertNoOverlap(result);
+  });
+
+  it('protects every group member when one is locked and preserves fixed internal and external geometry', async () => {
+    const first = { ...node('locked'), position: { x: 100, y: 100 }, groupId: 'group', locked: true };
+    const second = { ...node('protected'), position: { x: 460, y: 100 }, groupId: 'group' };
+    const fixed = { ...node('other-fixed'), position: { x: 120, y: 500 }, locked: true };
+    const moving = { ...node('editable'), position: { x: 160, y: 120 } };
+    const internal = { ...edge('inside', first.id, second.id), waypoints: [{ x: 330, y: 80 }] };
+    const betweenFixed = { ...edge('fixed-route', second.id, fixed.id), waypoints: [{ x: 700, y: 450 }] };
+    const editable = { ...edge('moving-route', second.id, moving.id), waypoints: [{ x: 800, y: 500 }] };
+    const original = { ...newDiagram(), nodes: [first, second, fixed, moving], edges: [internal, betweenFixed, editable] };
+    const result = await autoArrange(original);
+    expect(result.nodes.slice(0, 3)).toEqual(original.nodes.slice(0, 3));
+    expect(result.edges.slice(0, 2)).toEqual(original.edges.slice(0, 2));
+    expect(result.edges[2]).not.toHaveProperty('waypoints');
+    expect(result.edges[2].sourceHandle).toBe(editable.sourceHandle);
+    assertNoOverlap(result);
+    expect(await autoArrange(result)).toEqual(result);
+  });
+
+  it('keeps whole editable group bounds clear of several fixed units', async () => {
+    const original = {
+      ...newDiagram(),
+      nodes: [
+        { ...node('a'), groupId: 'moving', position: { x: 0, y: 0 } },
+        { ...node('b'), groupId: 'moving', position: { x: 360, y: 200 } },
+        { ...node('fixed-a', 'process', 650, 300), locked: true, position: { x: 0, y: 0 } },
+        { ...node('fixed-b', 'process', 500, 250), locked: true, position: { x: -550, y: 400 } },
+      ],
+      edges: [edge('ab', 'a', 'b'), edge('out', 'b', 'fixed-a')],
+    };
+    const result = await autoArrange(original);
+    expect(result.nodes[1].position.x - result.nodes[0].position.x).toBe(360);
+    expect(result.nodes[1].position.y - result.nodes[0].position.y).toBe(200);
+    expect(result.nodes.slice(2)).toEqual(original.nodes.slice(2));
+    const group = { ...result.nodes[0], width: 540, height: 280 };
+    assertNoOverlap({ ...result, nodes: [group, ...result.nodes.slice(2)] });
+    expect(await autoArrange(result)).toEqual(result);
+  });
+
+  it('clears manual bends on the ordinary editable path and leaves an entirely fixed diagram unchanged', async () => {
+    const original = branchingGraph();
+    original.edges[0].waypoints = [{ x: 4000, y: 2000 }];
+    const arranged = await autoArrange(original);
+    expect(arranged.edges[0]).not.toHaveProperty('waypoints');
+    const fixed = { ...original, nodes: original.nodes.map(node => ({ ...node, locked: true })) };
+    expect(await autoArrange(fixed)).toEqual(fixed);
+    const single = { ...newDiagram(), nodes: [{ ...node('only'), locked: true }] };
+    expect(await autoArrange(single)).toEqual(single);
+  });
+});

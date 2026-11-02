@@ -108,12 +108,11 @@ function crossings(a: Point[], b: Point[]): number {
   return count;
 }
 
-/** Arranges a local graph; positions and connection sides are the only changes. */
-export async function autoArrange(doc: Diagram): Promise<Diagram> {
-  const snapshot = validateDiagram(doc);
+/** Internal layout accepts group bounds larger than a portable individual shape. */
+async function layoutGraph(snapshot: Diagram): Promise<Diagram> {
   if (!snapshot.nodes.length) return snapshot;
   if (snapshot.nodes.length === 1) {
-    return validateDiagram({ ...snapshot, nodes: snapshot.nodes.map(node => ({ ...node, position: { x: 48, y: 48 } })) });
+    return { ...snapshot, nodes: snapshot.nodes.map(node => ({ ...node, position: { x: 48, y: 48 } })) };
   }
   const { feedback, forward, sides } = flowGraph(snapshot);
   const nodeIds = new Map(snapshot.nodes.map((node, index) => [node.id, `node-${index}`]));
@@ -221,5 +220,157 @@ export async function autoArrange(doc: Diagram): Promise<Diagram> {
   const top = Math.min(...nodes.map(node => node.position.y), ...routes.flatMap(route => route.map(point => point.y)));
   const dx = Math.max(0, 48 - left), dy = Math.max(0, 48 - top);
   for (const node of nodes) node.position = { x: node.position.x + dx, y: node.position.y + dy };
-  return validateDiagram({ ...snapshot, nodes, edges: snapshot.edges.map(edge => ({ ...edge, ...edgeSides.get(edge.id)! })) });
+  return { ...snapshot, nodes, edges: snapshot.edges.map(edge => ({ ...edge, ...edgeSides.get(edge.id)! })) };
+}
+
+
+type LayoutUnit = {
+  box: DiagramNode;
+  members: DiagramNode[];
+  fixed: boolean;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
+const UNIT_GAP = 32;
+
+function withoutBends(edge: DiagramEdge): DiagramEdge {
+  const copy = { ...edge };
+  delete copy.waypoints;
+  return copy;
+}
+
+function layoutUnits(snapshot: Diagram): { units: LayoutUnit[]; byNode: Map<string, LayoutUnit> } {
+  const groups = new Map<string, DiagramNode[]>();
+  for (const node of snapshot.nodes) {
+    const key = node.groupId === undefined ? `node:${node.id}` : `group:${node.groupId}`;
+    const members = groups.get(key);
+    if (members) members.push(node);
+    else groups.set(key, [node]);
+  }
+  const byNode = new Map<string, LayoutUnit>();
+  const units = [...groups.values()].map((members, index) => {
+    const left = Math.min(...members.map(node => node.position.x));
+    const top = Math.min(...members.map(node => node.position.y));
+    const right = Math.max(...members.map(node => node.position.x + node.width));
+    const bottom = Math.max(...members.map(node => node.position.y + node.height));
+    const unit: LayoutUnit = {
+      box: { ...members[0], id: `unit-${index}`, type: 'process', position: { x: left, y: top }, width: right - left, height: bottom - top },
+      members, fixed: members.some(node => node.locked === true), minX: -100000, minY: -100000,
+      maxX: 100000 - Math.max(...members.map(node => node.position.x - left)),
+      maxY: 100000 - Math.max(...members.map(node => node.position.y - top)),
+    };
+    for (const member of members) byNode.set(member.id, unit);
+    return unit;
+  });
+  for (const edge of snapshot.edges) {
+    const unit = byNode.get(edge.source)!;
+    if (unit !== byNode.get(edge.target) || !edge.waypoints?.length) continue;
+    for (const point of edge.waypoints) {
+      const x = point.x - unit.box.position.x, y = point.y - unit.box.position.y;
+      unit.minX = Math.max(unit.minX, -100000 - x); unit.maxX = Math.min(unit.maxX, 100000 - x);
+      unit.minY = Math.max(unit.minY, -100000 - y); unit.maxY = Math.min(unit.maxY, 100000 - y);
+    }
+  }
+  return { units, byNode };
+}
+
+/** A bounded nearest-first search keeps units close to their layered positions. */
+function placeAroundObstacles(unit: LayoutUnit, preferred: Point, occupied: DiagramNode[]): DiagramNode {
+  const box = unit.box;
+  const clamp = (point: Point): Point => ({ x: Math.max(unit.minX, Math.min(unit.maxX, point.x)), y: Math.max(unit.minY, Math.min(unit.maxY, point.y)) });
+  const desired = clamp(preferred);
+  const score = (point: Point) => (point.x - desired.x) ** 2 + (point.y - desired.y) ** 2;
+  const candidates: Point[] = [desired];
+  const visited = new Set<string>();
+  const add = (point: Point) => {
+    const clamped = clamp(point), key = `${clamped.x}:${clamped.y}`;
+    if (!visited.has(key)) { visited.add(key); candidates.push(clamped); }
+  };
+  visited.add(`${desired.x}:${desired.y}`);
+  for (let attempt = 0; candidates.length && attempt < 256; attempt++) {
+    candidates.sort((a, b) => score(a) - score(b) || a.y - b.y || a.x - b.x);
+    const position = candidates.shift()!;
+    const candidate = { ...box, position };
+    const obstacle = occupied.find(other => boxesOverlap(candidate, other, UNIT_GAP));
+    if (!obstacle) return candidate;
+    add({ x: obstacle.position.x - box.width - UNIT_GAP, y: position.y });
+    add({ x: obstacle.position.x + obstacle.width + UNIT_GAP, y: position.y });
+    add({ x: position.x, y: obstacle.position.y - box.height - UNIT_GAP });
+    add({ x: position.x, y: obstacle.position.y + obstacle.height + UNIT_GAP });
+  }
+  // Dense or unusually large diagrams still get a predictable, collision-free fallback.
+  const left = Math.min(...occupied.map(other => other.position.x));
+  const right = Math.max(...occupied.map(other => other.position.x + other.width));
+  const top = Math.min(...occupied.map(other => other.position.y));
+  const bottom = Math.max(...occupied.map(other => other.position.y + other.height));
+  const fallback = [
+    { x: right + UNIT_GAP, y: desired.y }, { x: left - box.width - UNIT_GAP, y: desired.y },
+    { x: desired.x, y: bottom + UNIT_GAP }, { x: desired.x, y: top - box.height - UNIT_GAP },
+    { x: unit.minX, y: unit.minY }, { x: unit.maxX, y: unit.maxY },
+  ].map(clamp).sort((a, b) => score(a) - score(b) || a.y - b.y || a.x - b.x);
+  for (const position of fallback) {
+    const candidate = { ...box, position };
+    if (!occupied.some(other => boxesOverlap(candidate, other, UNIT_GAP))) return candidate;
+  }
+  throw new Error('Auto arrange could not fit the editable shapes around locked shapes. The diagram has not been changed.');
+}
+
+async function arrangeUnits(snapshot: Diagram): Promise<Diagram> {
+  const { units, byNode } = layoutUnits(snapshot);
+  if (units.every(unit => unit.fixed)) return snapshot;
+  const external = snapshot.edges.filter(edge => byNode.get(edge.source) !== byNode.get(edge.target));
+  const proxy = {
+    ...snapshot, nodes: units.map(unit => unit.box),
+    edges: external.map(edge => ({ ...withoutBends(edge), source: byNode.get(edge.source)!.box.id, target: byNode.get(edge.target)!.box.id })),
+  };
+  const arranged = await layoutGraph(proxy);
+  const laidOut = new Map(arranged.nodes.map(node => [node.id, node]));
+  const edgeSides = new Map(arranged.edges.map(edge => [edge.id, edge]));
+  const anchor = units.find(unit => unit.fixed);
+  const offset = anchor ? {
+    x: anchor.box.position.x - laidOut.get(anchor.box.id)!.position.x,
+    y: anchor.box.position.y - laidOut.get(anchor.box.id)!.position.y,
+  } : { x: 0, y: 0 };
+  const placed = new Map<string, DiagramNode>();
+  const occupied = units.filter(unit => unit.fixed).map(unit => unit.box);
+  for (const unit of units.filter(unit => unit.fixed)) placed.set(unit.box.id, unit.box);
+  const movable = units.filter(unit => !unit.fixed).sort((a, b) => {
+    const first = laidOut.get(a.box.id)!, second = laidOut.get(b.box.id)!;
+    return first.position.y - second.position.y || first.position.x - second.position.x;
+  });
+  for (const unit of movable) {
+    const preferred = laidOut.get(unit.box.id)!.position;
+    const box = placeAroundObstacles(unit, { x: preferred.x + offset.x, y: preferred.y + offset.y }, occupied);
+    placed.set(unit.box.id, box); occupied.push(box);
+  }
+  const delta = (unit: LayoutUnit): Point => ({ x: placed.get(unit.box.id)!.position.x - unit.box.position.x, y: placed.get(unit.box.id)!.position.y - unit.box.position.y });
+  const nodes = snapshot.nodes.map(node => {
+    const unit = byNode.get(node.id)!;
+    if (unit.fixed) return node;
+    const change = delta(unit);
+    return { ...node, position: { x: node.position.x + change.x, y: node.position.y + change.y } };
+  });
+  const edges = snapshot.edges.map(edge => {
+    const source = byNode.get(edge.source)!, target = byNode.get(edge.target)!;
+    if (source === target) {
+      if (source.fixed || !edge.waypoints) return edge;
+      const change = delta(source);
+      return { ...edge, waypoints: edge.waypoints.map(point => ({ x: point.x + change.x, y: point.y + change.y })) };
+    }
+    if (source.fixed && target.fixed) return edge;
+    const sides = edgeSides.get(edge.id)!;
+    return { ...withoutBends(edge), sourceHandle: source.fixed ? edge.sourceHandle : sides.sourceHandle, targetHandle: target.fixed ? edge.targetHandle : sides.targetHandle };
+  });
+  return { ...snapshot, nodes, edges };
+}
+
+/** Preserves group geometry and locked units while arranging the editable graph. */
+export async function autoArrange(doc: Diagram): Promise<Diagram> {
+  const snapshot = validateDiagram(doc);
+  const constrained = snapshot.nodes.some(node => node.groupId !== undefined || node.locked === true);
+  return validateDiagram(constrained
+    ? await arrangeUnits(snapshot)
+    : await layoutGraph({ ...snapshot, edges: snapshot.edges.map(withoutBends) }));
 }

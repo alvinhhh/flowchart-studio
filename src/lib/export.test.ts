@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Diagram, DiagramNode, HandleId } from './diagram';
 import { diagramToSvg, exportBounds } from './export';
 import { edgeRoute, wrapLabel } from './geometry';
+import { routeDiagramEdge } from './routing';
 
 function shape(id: string, x: number, y: number): DiagramNode {
   return { id, type: 'process', position: { x, y }, width: 180, height: 80, label: id, notes: '', style: { color: 'neutral' } };
@@ -82,6 +83,21 @@ describe('complete diagram export', () => {
 
   it('rejects invalid shape coordinates before building a raster image', () => {
     expect(() => diagramToSvg(document([shape('invalid', NaN, 0)]))).toThrow(/invalid dimensions/);
+  });
+
+  it('exports the same obstacle-aware route and explicit bends as the editor', () => {
+    const doc = document([shape('start', 0, 0), shape('end', 700, 0), shape('obstacle', 350, 0)]);
+    const edge = { id: 'route', source: 'start', target: 'end', sourceHandle: 'right' as const, targetHandle: 'left' as const, label: 'Continue', style: { color: 'neutral' as const } };
+    doc.edges = [edge];
+    const automatic = routeDiagramEdge(edge, doc.nodes[0], doc.nodes[1], doc.nodes);
+    expect(diagramToSvg(doc)).toContain(`d="${automatic.path}"`);
+    Object.assign(edge, { waypoints: [{ x: -900, y: -700 }, { x: 1100, y: -700 }] });
+    const edited = routeDiagramEdge(edge, doc.nodes[0], doc.nodes[1], doc.nodes);
+    expect(diagramToSvg(doc)).toContain(`d="${edited.path}"`);
+    const bounds = exportBounds(doc);
+    expect(bounds.x).toBeLessThan(-900);
+    expect(bounds.y).toBeLessThan(-700);
+    expect(bounds.x + bounds.width).toBeGreaterThan(1100);
   });
 });
 

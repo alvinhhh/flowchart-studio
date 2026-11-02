@@ -1,17 +1,30 @@
 'use client';
-import { memo } from 'react';
-import { BaseEdge, EdgeLabelRenderer, Handle, Position, type EdgeProps, type Node, type NodeProps } from '@xyflow/react';
+import { LockKeyhole } from 'lucide-react';
+import { memo, useCallback, useLayoutEffect } from 'react';
+import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizeControl, Position, useUpdateNodeInternals, type EdgeProps, type Node, type NodeProps, type ResizeParams } from '@xyflow/react';
 import type { DiagramEdge, DiagramNode, HandleId } from '@/lib/diagram';
 import { colorValues, edgeRoute, nodePath, nodeTextBox, handlePoint, wrapLabel, labelWidth } from '@/lib/geometry';
 
-export type FlowNode = Node<{ model: DiagramNode }, 'shape'>;
+export type FlowNode = Node<{ model: DiagramNode; resizeEnabled?: boolean; onResizeStart?: (id: string) => void }, 'shape'>;
+const corners = ['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const;
 const positions: Record<HandleId, Position> = { top: Position.Top, right: Position.Right, bottom: Position.Bottom, left: Position.Left };
 export const ShapeNode = memo(function ShapeNode({ data, selected }: NodeProps<FlowNode>) {
   const n = data.model;
+  const updateInternals = useUpdateNodeInternals();
+  useLayoutEffect(() => { updateInternals(n.id); }, [n.id, n.width, n.height, updateInternals]);
   const colors = colorValues(n.style.color);
   const box = nodeTextBox(n.type, n.width, n.height);
   const lines = wrapLabel(n.label, box.width);
+  const { onResizeStart } = data;
+  const beginResize = useCallback(() => onResizeStart?.(n.id), [onResizeStart, n.id]);
+  const canResize = useCallback((_: unknown, size: ResizeParams) => {
+    const text = nodeTextBox(n.type, size.width, size.height);
+    return size.x >= -100000 && size.x <= 100000 && size.y >= -100000 && size.y <= 100000
+      && (!n.label || wrapLabel(n.label, text.width).length * 20 <= text.height);
+  }, [n.type, n.label]);
   return <div className={`shape-node${selected ? ' is-selected' : ''}`} style={{ width: n.width, height: n.height }}>
+    {selected && data.resizeEnabled && corners.map(position => <NodeResizeControl key={position} position={position} className="shape-resize-handle" minWidth={40} minHeight={40} maxWidth={2000} maxHeight={2000} shouldResize={canResize} onResizeStart={beginResize} color="#fff"><span className="resize-hit-area" title={`Resize ${position.replace('-', ' ')}`} /></NodeResizeControl>)}
+    {n.locked && <span className="node-lock" aria-label="Locked"><LockKeyhole size={11} /></span>}
     <svg width={n.width} height={n.height} viewBox={`0 0 ${n.width} ${n.height}`} aria-hidden="true" overflow="visible">
       <path d={nodePath(n.type, n.width, n.height)} fill={colors.fill} stroke={colors.stroke} strokeWidth={1.5} />
       <text x={box.x} fill={colors.text} textAnchor="middle" fontSize={14} fontWeight={500}>

@@ -42,7 +42,7 @@ test('server HTML explains the free editor and exposes canonical metadata withou
     await expect(page.getByRole('heading', { name: 'How to draw a flowchart', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Common questions', exact: true })).toBeVisible();
     await page.getByText('Is the editor free?', { exact: true }).click();
-    await expect(page.getByText('Yes. The local editor, browser saves, and JSON and PNG exports are free. No account or payment is required.', { exact: true })).toBeVisible();
+    await expect(page.getByText('Yes. The local editor, browser saves, and JSON, PNG, SVG, and PDF exports are free. No account or payment is required.', { exact: true })).toBeVisible();
     const canonical = await page.locator('link[rel="canonical"]').getAttribute('href');
     expect(canonical).toBeTruthy();
     const canonicalURL = new URL(canonical!);

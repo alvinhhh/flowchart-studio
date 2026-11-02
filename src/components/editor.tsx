@@ -3,26 +3,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ReactFlow, ReactFlowProvider, Background, BackgroundVariant, ConnectionMode, MarkerType, Panel, SelectionMode, applyNodeChanges, useReactFlow, type Connection, type Edge, type NodeChange, type Viewport } from '@xyflow/react';
-import { ArrowDownToLine, ArrowUpFromLine, Check, CircleHelp, Copy, Diamond, FilePlus2, Files, Hand, Pencil, Eraser, Search, Link2, Maximize, Minus, MousePointer2, Plus, Redo2, Shapes, Trash2, Undo2, Workflow, X } from 'lucide-react';
+import { ReactFlow, ReactFlowProvider, Background, BackgroundVariant, ConnectionMode, MarkerType, Panel, SelectionMode, Position, applyNodeChanges, useReactFlow, type Connection, type Edge, type NodeChange, type Viewport } from '@xyflow/react';
+import { ArrowDownToLine, ArrowUpFromLine, Check, CircleHelp, Copy, ClipboardPaste, Scissors, LockKeyhole, Unlock, Group, Ungroup, Diamond, FilePlus2, Files, Hand, Pencil, Eraser, Search, Link2, Maximize, Minus, MousePointer2, Plus, Redo2, Shapes, Trash2, Undo2, Workflow, X } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 import './editor.css';
 import { COLOR_LABELS, COLORS, HANDLES, NODE_DEFINITIONS, NODE_TYPES, NODE_TYPE_LABELS, createNode, duplicateSelection, exampleDiagram, freshId, newDiagram, parseDiagram, type CanvasBackground, type ColorName, type Diagram, type DiagramEdge, type DiagramNode, type HandleId, type NodeKind } from '@/lib/diagram';
 import { PRODUCT } from '@/lib/config';
-import { colorValues, nodePath, nodeTextBox, wrapLabel } from '@/lib/geometry';
-import { downloadJson, downloadPng } from '@/lib/export';
+import { colorValues, nodePath, nodeTextBox, handlePoint, wrapLabel } from '@/lib/geometry';
+import { downloadJson, downloadPng, downloadSvg, downloadPdf } from '@/lib/export';
 import { useDocuments } from '@/lib/use-documents';
 import { alignShapes, type AlignmentGuide } from '@/lib/alignment';
-import { RoutedEdge, ShapeNode, type FlowNode } from './diagram-elements';
+import { ShapeNode, type FlowNode } from './diagram-elements';
+import { EditableEdge } from './editable-edge';
+import { expandSelection, copySelection, pasteSelection, groupSelection, ungroupSelection, lockSelection, moveNodes, arrangeSelection, type ArrangeMode } from '@/lib/editing';
 import AlignmentOverlay from './alignment-overlay';
 import DrawingOverlay from './drawing-overlay';
 import { drawingBounds, type DrawingStroke } from '@/lib/drawing';
 import Modal from './modal';
 
 const nodeTypes = { shape: ShapeNode };
-const edgeTypes = { routed: RoutedEdge };
+const edgeTypes = { routed: EditableEdge };
 type PaletteDrag = { node: DiagramNode; documentId: string; pointerId: number; start: { x: number; y: number }; point: { x: number; y: number }; active: boolean; canceled: boolean };
-function portableNode(n: DiagramNode, selected = false): FlowNode { return { id: n.id, type: 'shape', position: n.position, width: n.width, height: n.height, data: { model: n }, selected, ariaLabel: `${NODE_TYPE_LABELS[n.type]}: ${n.label || 'Untitled'}` }; }
+function nodeHandles(node: DiagramNode) {
+  const positions = { top: Position.Top, right: Position.Right, bottom: Position.Bottom, left: Position.Left };
+  return HANDLES.map(id => {
+    const anchor = handlePoint({ ...node, position: { x: 0, y: 0 } }, id);
+    return { id, type: 'source' as const, position: positions[id], x: anchor.x - 4.5, y: anchor.y - 4.5, width: 9, height: 9 };
+  });
+}
+function portableNode(n: DiagramNode, selected = false): FlowNode { return { id: n.id, type: 'shape', position: n.position, width: n.width, height: n.height, handles: nodeHandles(n), data: { model: n }, selected, ariaLabel: `${NODE_TYPE_LABELS[n.type]}: ${n.label || 'Untitled'}` }; }
 function growLabel(node: DiagramNode, label: string): DiagramNode {
   let width = node.width, height = node.height;
   for (let attempt = 0; attempt < 30; attempt++) {
@@ -42,7 +51,7 @@ function Workspace() {
   const search = useSearchParams();
   const [openExample] = useState(() => search.get('example') === '1');
   const store = useDocuments(openExample);
-  const { doc } = store;
+  const { doc, current: currentHistory } = store;
   const flow = useReactFlow<FlowNode>();
   const [flowNodes, setFlowNodes] = useState<FlowNode[]>([]);
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
@@ -53,6 +62,12 @@ function Workspace() {
   const [tool, setTool] = useState<'pan' | 'select' | 'draw' | 'erase'>('pan');
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [drawingActive, setDrawingActive] = useState(false);
+  const [edgeEditing, setEdgeEditing] = useState(false);
+  const clipboard = useRef<Diagram | null>(null);
+  const pasteCount = useRef(0);
+  const [resizingId, setResizingId] = useState<string | null>(null);
+  const resizeSession = useRef<{ id: string; documentId: string } | null>(null);
+  const canceledResizes = useRef(new Set<string>());
   const [penColor, setPenColor] = useState<ColorName>('neutral');
   const [penWidth, setPenWidth] = useState(3);
   const effectiveTool = spaceHeld ? 'pan' : tool;
@@ -75,6 +90,33 @@ function Workspace() {
   const previousNodes = useRef<DiagramNode[] | null>(null);
   const selectionRef = useRef({ nodes: [] as string[], edges: [] as string[] });
   const readonly = store.readonly || store.busy || arranging;
+  const beginResize = (id: string) => {
+    const current = currentHistory.current?.present;
+    if (!current) return;
+    canceledResizes.current.delete(id);
+    resizeSession.current = { id, documentId: current.documentId };
+    setResizingId(id); setGuides([]);
+  };
+  const cancelResize = () => {
+    if (!resizeSession.current) return;
+    canceledResizes.current.add(resizeSession.current.id);
+    resizeSession.current = null;
+    setResizingId(null);
+    const current = currentHistory.current?.present;
+    if (current) setFlowNodes(current.nodes.map(node => portableNode(node, selectionRef.current.nodes.includes(node.id))));
+  };
+  const lockedIds = useMemo(() => {
+    const groups = new Set(doc?.nodes.filter(node => node.locked && node.groupId).map(node => node.groupId));
+    return new Set(doc?.nodes.filter(node => node.locked || (node.groupId && groups.has(node.groupId))).map(node => node.id));
+  }, [doc?.nodes]);
+  const displayNodes = flowNodes.map(node => ({ ...node, handles: nodeHandles(node.data.model), draggable: !readonly && !spaceHeld && (tool === 'pan' || tool === 'select') && !lockedIds.has(node.id), data: { ...node.data,
+    resizeEnabled: !lockedIds.has(node.id) && !node.data.model.groupId && !readonly && !spaceHeld && !modal && (tool === 'pan' || tool === 'select') && selectedNodes.length === 1 && !selectedEdges.length,
+    onResizeStart: beginResize,
+  } }));
+
+  useEffect(() => {
+    if (readonly || (resizeSession.current && resizeSession.current.documentId !== doc?.documentId)) cancelResize();
+  });
 
 
   useEffect(() => {
@@ -112,15 +154,39 @@ function Workspace() {
     setSelectedNodes(previous => same(previous, nodeIds) ? previous : nodeIds);
     setSelectedEdges(previous => same(previous, edgeIds) ? previous : edgeIds);
   }, []);
-  const edges: Edge[] = useMemo(() => doc?.edges.map(edge => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle, targetHandle: edge.targetHandle, type: 'routed', data: { model: edge }, selected: selectedEdges.includes(edge.id), markerEnd: { type: MarkerType.ArrowClosed, color: colorValues(edge.style.color).stroke, width: 18, height: 18 }, ariaLabel: `Connection ${edge.label || 'unlabeled'}`, reconnectable: !readonly })) ?? [], [doc, readonly, selectedEdges]);
-  const select = useCallback((nodes: string[], edges: string[]) => { selectionRef.current = { nodes, edges }; setSelectedNodes(nodes); setSelectedEdges(edges); setFlowNodes(previous => previous.map(n => ({ ...n, selected: nodes.includes(n.id) }))); }, []);
+  const liveDiagram = useMemo(() => {
+    if (!doc) return null;
+    const moved = moveNodes(doc, new Map(flowNodes.map(node => [node.id, node.position])));
+    return { ...moved, nodes: moved.nodes.map(node => {
+      const live = flowNodes.find(item => item.id === node.id);
+      return live ? { ...node, width: live.data.model.width, height: live.data.model.height } : node;
+    }) };
+  }, [doc, flowNodes]);
+  const changeWaypoints = (id: string, waypoints: { x: number; y: number }[]) => {
+    const current = currentHistory.current?.present;
+    if (!current || readonly) return;
+    try { store.change({ ...current, edges: current.edges.map(edge => {
+      if (edge.id !== id) return edge;
+      const next: DiagramEdge = { ...edge, waypoints };
+      if (!waypoints.length) delete next.waypoints;
+      return next;
+    }) }); }
+    catch (error) { store.setError(error instanceof Error ? error.message : 'Could not update this connection.'); }
+  };
+  const edges: Edge[] = liveDiagram?.edges.map(edge => ({ id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.sourceHandle, targetHandle: edge.targetHandle, type: 'routed', data: { model: edge, nodes: liveDiagram.nodes, readonly: readonly || tool === 'draw' || tool === 'erase', onWaypointsChange: changeWaypoints, onEditingChange: setEdgeEditing }, selected: selectedEdges.includes(edge.id), markerEnd: { type: MarkerType.ArrowClosed, color: colorValues(edge.style.color).stroke, width: 18, height: 18 }, ariaLabel: `Connection ${edge.label || 'unlabeled'}`, reconnectable: !readonly })) ?? [];
+  const select = (nodes: string[], edges: string[]) => {
+    const current = currentHistory.current?.present;
+    const ids = current ? expandSelection(current, nodes) : nodes;
+    selectionRef.current = { nodes: ids, edges }; setSelectedNodes(ids); setSelectedEdges(edges);
+    setFlowNodes(previous => previous.map(node => ({ ...node, selected: ids.includes(node.id) })));
+  };
   const commit = (next: Diagram, record = true) => { if (!readonly) { try { store.change(next, record); } catch (e) { store.setError(e instanceof Error ? e.message : 'This edit could not be applied.'); } } };
-  const updateNode = (id: string, update: Partial<DiagramNode>) => { const d = store.current.current?.present; if (d) commit({ ...d, nodes: d.nodes.map(n => n.id === id ? { ...n, ...update } : n) }); };
+  const updateNode = (id: string, update: Partial<DiagramNode>) => { const d = store.current.current?.present; if (d && !lockedIds.has(id)) commit({ ...d, nodes: d.nodes.map(n => n.id === id ? { ...n, ...update } : n) }); };
   const updateEdge = (id: string, update: Partial<DiagramEdge>) => { const d = store.current.current?.present; if (d) { const edge = d.edges.find(e => e.id === id); if (edge && (update.source ?? edge.source) === (update.target ?? edge.target)) { store.setError('Connect two different nodes. Use a second node to create a loop.'); return; } commit({ ...d, edges: d.edges.map(e => e.id === id ? { ...e, ...update } : e) }); } };
   const deleteSelection = () => {
     const d = store.current.current?.present;
     if (!d || readonly) return;
-    const nodes = new Set(selectionRef.current.nodes), edges = new Set(selectionRef.current.edges);
+    const nodes = new Set(expandSelection(d, selectionRef.current.nodes).filter(id => !lockedIds.has(id))), edges = new Set(selectionRef.current.edges);
     if (!nodes.size && !edges.size) return;
     commit({ ...d, nodes: d.nodes.filter(n => !nodes.has(n.id)), edges: d.edges.filter(e => !nodes.has(e.source) && !nodes.has(e.target) && !edges.has(e.id)) }); select([], []);
   };
@@ -128,6 +194,54 @@ function Workspace() {
     const d = store.current.current?.present;
     if (!d || readonly || !selectionRef.current.nodes.length) return;
     try { const next = duplicateSelection(d, selectionRef.current.nodes); commit(next); select(next.nodes.filter(n => !d.nodes.some(p => p.id === n.id)).map(n => n.id), []); } catch (e) { store.setError(e instanceof Error ? e.message : 'Could not duplicate the selection.'); }
+  };
+  const copy = async (cut = false) => {
+    const current = currentHistory.current?.present;
+    if (!current || readonly || resizeSession.current || edgeEditing) return;
+    const ids = cut ? selectionRef.current.nodes.filter(id => !lockedIds.has(id)) : selectionRef.current.nodes;
+    const fragment = copySelection(current, ids);
+    if (!fragment) return;
+    clipboard.current = fragment; pasteCount.current = 0;
+    if (cut) deleteSelection();
+    setNotice(`${cut ? 'Cut' : 'Copied'} ${fragment.nodes.length} shapes.`);
+    try { await navigator.clipboard.writeText(JSON.stringify({ format: 'flowchart-studio/selection', diagram: fragment })); }
+    catch { setNotice('Copied within this editor.'); }
+  };
+  const paste = async () => {
+    const initial = currentHistory.current?.present;
+    if (!initial || readonly || resizeSession.current || edgeEditing || !canvas.current) return;
+    let fragment = clipboard.current;
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text.length <= 10 * 1024 * 1024) {
+        try {
+          const content = JSON.parse(text);
+          fragment = content?.format === 'flowchart-studio/selection' ? parseDiagram(JSON.stringify(content.diagram)) : null;
+        } catch { fragment = null; }
+      }
+    } catch { /* Use this editor's clipboard if system access is unavailable. */ }
+    const current = currentHistory.current?.present;
+    if (!fragment?.nodes.length || !current || current.documentId !== initial.documentId) { setNotice('Copy shapes before pasting.'); return; }
+    try {
+      const bounds = canvas.current.getBoundingClientRect();
+      const center = flow.screenToFlowPosition({ x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }, { snapToGrid: false });
+      const offset = (pasteCount.current++ % 10) * 24;
+      const result = pasteSelection(current, fragment, { x: center.x + offset, y: center.y + offset });
+      commit(result.diagram); select(result.nodeIds, []); setTool('pan');
+      setNotice(`Pasted ${result.nodeIds.length} shapes.`);
+    } catch (error) { store.setError(error instanceof Error ? error.message : 'Could not paste these shapes.'); }
+  };
+  const arrangeSelected = (mode: ArrangeMode) => {
+    const current = currentHistory.current?.present;
+    if (current) commit(arrangeSelection(current, selectionRef.current.nodes, mode));
+  };
+  const groupSelected = (ungroup = false) => {
+    const current = currentHistory.current?.present;
+    if (current) { const next = ungroup ? ungroupSelection(current, selectionRef.current.nodes) : groupSelection(current, selectionRef.current.nodes); commit(next); select(expandSelection(next, selectionRef.current.nodes), []); }
+  };
+  const lockSelected = (locked: boolean) => {
+    const current = currentHistory.current?.present;
+    if (current) { commit(lockSelection(current, selectionRef.current.nodes, locked)); select(selectionRef.current.nodes, selectionRef.current.edges); }
   };
   const hidePalettePreview = () => { setPalettePreview(null); setPaletteLabel(null); setGuides([]); };
   const clearPaletteDrag = () => { paletteDrag.current = null; hidePalettePreview(); };
@@ -193,6 +307,11 @@ function Workspace() {
       if (event.key === 'Escape' && paletteDrag.current) {
         event.preventDefault(); paletteDrag.current.canceled = true; hidePalettePreview(); return;
       }
+      if (resizeSession.current || edgeEditing) {
+        if (event.key === 'Escape' && resizeSession.current) { event.preventDefault(); cancelResize(); }
+        else if ((event.metaKey || event.ctrlKey) && ['z', 'y', 'd', 'a'].includes(event.key.toLowerCase())) event.preventDefault();
+        return;
+      }
       if (textFocus(event.target) || modal) return;
       if (event.code === 'Space') { event.preventDefault(); setSpaceHeld(true); return; }
       if (readonly || drawingActive) return;
@@ -202,6 +321,10 @@ function Workspace() {
       else if (mod && char === 'y') { event.preventDefault(); store.redo(); }
       else if (mod && char === 'a') { event.preventDefault(); if (doc) select(doc.nodes.map(n => n.id), doc.edges.map(e => e.id)); }
       else if (mod && char === 'd') { event.preventDefault(); duplicate(); }
+      else if (mod && char === 'c' && selectionRef.current.nodes.length) { event.preventDefault(); void copy(); }
+      else if (mod && char === 'x' && selectionRef.current.nodes.length) { event.preventDefault(); void copy(true); }
+      else if (mod && char === 'v') { event.preventDefault(); void paste(); }
+      else if (mod && char === 'g') { event.preventDefault(); groupSelected(event.shiftKey); }
       else if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); deleteSelection(); }
       else if (event.key === 'Escape') { select([], []); setTool('pan'); }
       else if (!mod && !event.altKey && char === 'h') setTool('pan');
@@ -215,7 +338,7 @@ function Workspace() {
       bypassSnapping.current = false;
       if (paletteDrag.current?.active) updatePalettePreview(paletteDrag.current.point, false);
     };
-    const blur = () => { setSpaceHeld(false); bypassSnapping.current = false; clearPaletteDrag(); };
+    const blur = () => { cancelResize(); setSpaceHeld(false); bypassSnapping.current = false; clearPaletteDrag(); };
     window.addEventListener('keydown', key); window.addEventListener('keyup', release); window.addEventListener('blur', blur);
     return () => { window.removeEventListener('keydown', key); window.removeEventListener('keyup', release); window.removeEventListener('blur', blur); };
   });
@@ -238,20 +361,41 @@ function Workspace() {
     commit({ ...d, edges: [...d.edges, { id: freshId(), source: connection.source, target: connection.target, sourceHandle: (connection.sourceHandle as HandleId) ?? 'bottom', targetHandle: (connection.targetHandle as HandleId) ?? 'top', label, style: { color: 'neutral' } }] });
   };
   const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
-    const allowed = readonly ? changes.filter(c => c.type === 'select' || c.type === 'dimensions') : changes;
+    const allowed = changes.filter(change => {
+      if ('id' in change && lockedIds.has(change.id) && (change.type === 'position' || (change.type === 'dimensions' && change.resizing !== undefined))) return false;
+      if ('id' in change && canceledResizes.current.has(change.id) && (change.type === 'position' || (change.type === 'dimensions' && change.resizing !== undefined))) {
+        if (change.type === 'dimensions' && change.resizing === false) canceledResizes.current.delete(change.id);
+        return false;
+      }
+      return !readonly || change.type === 'select' || (change.type === 'dimensions' && change.resizing === undefined);
+    });
     let next = applyNodeChanges(allowed, flowNodes);
-    const positions = changes.filter(c => c.type === 'position');
+    const resizing = allowed.filter((change): change is Extract<NodeChange<FlowNode>, { type: 'dimensions' }> => change.type === 'dimensions' && change.resizing !== undefined);
+    if (resizing.length) {
+      const ids = new Set(resizing.map(change => change.id));
+      next = next.map(node => ids.has(node.id) ? { ...node, data: { ...node.data, model: { ...node.data.model, position: node.position, width: node.width ?? node.data.model.width, height: node.height ?? node.data.model.height } } } : node);
+    }
+    const positions = allowed.filter(c => c.type === 'position');
     const pointerPositions = positions.filter(c => c.dragging !== undefined);
     const d = store.current.current?.present;
     if (!readonly && d && pointerPositions.length) {
-      const ids = new Set(pointerPositions.map(change => change.id));
+      const ids = new Set(expandSelection(d, pointerPositions.map(change => change.id)));
+      const moved = moveNodes(d, new Map(pointerPositions.map(change => [change.id, next.find(node => node.id === change.id)!.position])));
+      next = next.map(node => ids.has(node.id) ? { ...node, position: moved.nodes.find(item => item.id === node.id)!.position } : node);
       const boxes = next.map(node => ({ ...node.data.model, position: node.position }));
       const aligned = alignShapes(boxes.filter(node => ids.has(node.id)), boxes.filter(node => !ids.has(node.id)), { zoom: flow.getZoom(), snapToGrid: d.settings.snapToGrid && !bypassSnapping.current, enabled: alignmentEnabled && !bypassSnapping.current });
       next = next.map(node => ids.has(node.id) ? { ...node, position: { x: node.position.x + aligned.delta.x, y: node.position.y + aligned.delta.y } } : node);
       setGuides(pointerPositions.some(change => change.dragging) ? aligned.guides : []);
     }
     setFlowNodes(next);
-    if (!readonly && d && positions.length && positions.every(c => c.dragging !== true)) commit({ ...d, nodes: d.nodes.map(n => ({ ...n, position: next.find(f => f.id === n.id)?.position ?? n.position })) });
+    if (resizing.some(change => change.type === 'dimensions' && change.resizing === false)) {
+      const session = resizeSession.current;
+      resizeSession.current = null; setResizingId(null);
+      if (!readonly && d && session?.documentId === d.documentId) {
+        const resized = next.find(node => node.id === session.id);
+        if (resized) commit({ ...d, nodes: d.nodes.map(node => node.id === session.id ? { ...node, position: resized.position, width: resized.data.model.width, height: resized.data.model.height } : node) });
+      }
+    } else if (!readonly && !resizeSession.current && !resizing.length && d && positions.length && positions.every(c => c.dragging !== true)) commit(moveNodes(d, new Map(next.map(node => [node.id, node.position]))));
   };
   const moveEnd = (_: MouseEvent | TouchEvent | null, viewport: Viewport) => {
     setZoom(viewport.zoom);
@@ -279,6 +423,8 @@ function Workspace() {
   };
   const startConnection = () => { if (!doc) return; const source = selectedNodes[0] ?? doc.nodes[0]?.id ?? ''; setConnectionDraft({ source, target: doc.nodes.find(n => n.id !== source)?.id ?? '', sourceHandle: 'bottom', targetHandle: 'top', label: '' }); setModal('connection'); };
   const exportJSON = () => { const d = store.current.current?.present; if (d) { downloadJson(d); setNotice('JSON backup downloaded.'); } };
+  const exportSVG = () => { if (doc) { try { downloadSvg(doc); setNotice('SVG downloaded.'); } catch (error) { store.setError(error instanceof Error ? error.message : 'SVG export failed.'); } } };
+  const exportPDF = async () => { if (!doc) return; setExporting(true); try { await downloadPdf(doc); setNotice('PDF downloaded.'); } catch (error) { store.setError(error instanceof Error ? error.message : 'PDF export failed.'); } finally { setExporting(false); } };
   const exportPNG = async () => { if (!doc) return; setExporting(true); try { await downloadPng(doc); setNotice('PNG downloaded.'); } catch (e) { store.setError(e instanceof Error ? e.message : 'PNG export failed. JSON download remains available.'); } finally { setExporting(false); } };
   const importFile = async (selected?: File) => {
     if (!selected) return;
@@ -293,6 +439,10 @@ function Workspace() {
   const chosenNode = selectedNodes.length === 1 && !selectedEdges.length ? doc?.nodes.find(n => n.id === selectedNodes[0]) : undefined;
   const chosenEdge = selectedEdges.length === 1 && !selectedNodes.length ? doc?.edges.find(e => e.id === selectedEdges[0]) : undefined;
   const hasSelection = selectedNodes.length + selectedEdges.length > 0;
+  const selectedModels = doc?.nodes.filter(node => selectedNodes.includes(node.id)) ?? [];
+  const selectedLocked = selectedModels.some(node => lockedIds.has(node.id));
+  const selectedUnits = new Set(selectedModels.filter(node => !lockedIds.has(node.id)).map(node => node.groupId ?? node.id)).size;
+  const nodeReadonly = readonly || !!(chosenNode && lockedIds.has(chosenNode.id));
   const visibleShapes = NODE_TYPES.filter(kind => `${NODE_TYPE_LABELS[kind]} ${NODE_DEFINITIONS[kind].keywords}`.toLowerCase().includes(shapeSearch.trim().toLowerCase()));
   const addDrawing = (stroke: DrawingStroke) => {
     const current = store.current.current?.present;
@@ -319,26 +469,31 @@ function Workspace() {
       <input key={`${doc.documentId}:${doc.title}`} className="document-title" aria-label="Diagram title" defaultValue={doc.title} maxLength={200} disabled={readonly} onBlur={e => { const title = e.target.value.trim(); if (title && title !== doc.title) commit({ ...store.current.current!.present, title }); else e.target.value = doc.title; }} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
       <span className={`save-status ${store.status === 'error' || store.status === 'conflict' ? 'save-error' : ''}`} role="status">{store.status === 'saved' ? <><Check size={13} />Saved on this device</> : store.status === 'saving' ? 'Saving…' : store.status === 'conflict' ? 'Read-only copy' : 'Save failed'}</span>
       <div className="header-actions">
-        <button className="button" disabled={arranging || drawingActive} onClick={() => setModal('documents')}><Files size={15} /><span>Documents</span></button>
+        <button className="button" disabled={arranging || drawingActive || !!resizingId || edgeEditing} onClick={() => setModal('documents')}><Files size={15} /><span>Documents</span></button>
         <button className="icon-button" aria-label="Help" disabled={drawingActive} onClick={() => setModal('help')}><CircleHelp size={19} /></button>
       </div>
     </header>
     <div className="editor-toolbar" role="toolbar" aria-label="Diagram tools">
       <button className="button palette-toggle" onClick={() => setPalette(!palette)} aria-expanded={palette}><Shapes size={16} />Shapes</button>
-      <button className="icon-button" aria-label="Undo" title="Undo (⌘/Ctrl Z)" disabled={!store.canUndo || readonly || drawingActive} onClick={store.undo}><Undo2 size={18} /></button>
-      <button className="icon-button" aria-label="Redo" title="Redo (⌘/Ctrl Shift Z)" disabled={!store.canRedo || readonly || drawingActive} onClick={store.redo}><Redo2 size={18} /></button>
+      <button className="icon-button" aria-label="Undo" title="Undo (⌘/Ctrl Z)" disabled={!store.canUndo || readonly || drawingActive || !!resizingId || edgeEditing} onClick={store.undo}><Undo2 size={18} /></button>
+      <button className="icon-button" aria-label="Redo" title="Redo (⌘/Ctrl Shift Z)" disabled={!store.canRedo || readonly || drawingActive || !!resizingId || edgeEditing} onClick={store.redo}><Redo2 size={18} /></button>
       <span className="toolbar-divider" />
+      <button className="icon-button" aria-label="Copy selection" title="Copy (⌘/Ctrl C)" disabled={!selectedNodes.length || readonly} onClick={() => void copy()}><Copy size={17} /></button>
+      <button className="icon-button" aria-label="Cut selection" title="Cut (⌘/Ctrl X)" disabled={!selectedNodes.length || readonly || selectedLocked} onClick={() => void copy(true)}><Scissors size={17} /></button>
+      <button className="icon-button" aria-label="Paste" title="Paste (⌘/Ctrl V)" disabled={readonly} onClick={() => void paste()}><ClipboardPaste size={17} /></button>
       <button className="icon-button" aria-label="Duplicate selection" title="Duplicate selection (⌘/Ctrl D)" disabled={!selectedNodes.length || readonly} onClick={duplicate}><Copy size={17} /></button>
       <button className="icon-button" aria-label="Delete selection" title="Delete selection" disabled={!hasSelection || readonly} onClick={deleteSelection}><Trash2 size={17} /></button>
       <span className="toolbar-divider" />
       <button className="button" onClick={startConnection} disabled={doc.nodes.length < 2 || readonly}><Link2 size={16} /><span>Connect nodes</span></button>
-      <button className="button" aria-label="Auto arrange" disabled={!doc.nodes.length || readonly || drawingActive} onClick={() => void arrange()}><Workflow size={16} /><span>{arranging ? 'Arranging…' : 'Auto arrange'}</span></button>
+      <button className="button" aria-label="Auto arrange" disabled={!doc.nodes.length || readonly || drawingActive || !!resizingId || edgeEditing} onClick={() => void arrange()}><Workflow size={16} /><span>{arranging ? 'Arranging…' : 'Auto arrange'}</span></button>
       <label className="snap-toggle"><input type="checkbox" checked={doc.settings.snapToGrid} disabled={readonly} onChange={e => commit({ ...doc, settings: { ...doc.settings, snapToGrid: e.target.checked } })} />Snap to grid</label>
       <label className="snap-toggle"><input type="checkbox" checked={alignmentEnabled} disabled={readonly} onChange={e => { setAlignmentEnabled(e.target.checked); setGuides([]); try { localStorage.setItem('flowchart:align-shapes', String(e.target.checked)); } catch { /* Optional preference. */ } }} />Align shapes</label>
       <div className="toolbar-end">
         <input ref={file} type="file" accept=".json,application/json" aria-label="Import diagram file" hidden onChange={e => void importFile(e.target.files?.[0])} />
-        <button className="button" disabled={store.busy || arranging || drawingActive} onClick={() => file.current?.click()}><ArrowUpFromLine size={15} /><span>Import JSON</span></button>
+        <button className="button" disabled={store.busy || arranging || drawingActive || !!resizingId || edgeEditing} onClick={() => file.current?.click()}><ArrowUpFromLine size={15} /><span>Import JSON</span></button>
         <button className="button" onClick={exportJSON}><ArrowDownToLine size={15} /><span>Export JSON</span></button>
+        <button className="button" onClick={exportSVG}><ArrowDownToLine size={15} /><span>Export SVG</span></button>
+        <button className="button" disabled={exporting} onClick={() => void exportPDF()}><ArrowDownToLine size={15} /><span>Export PDF</span></button>
         <button className="button button-dark" disabled={exporting} onClick={() => void exportPNG()}><ArrowDownToLine size={15} /><span>{exporting ? 'Exporting…' : 'Export PNG'}</span></button>
       </div>
     </div>
@@ -362,8 +517,8 @@ function Workspace() {
         <div className="palette-bottom"><button className="button" disabled={readonly} onClick={async () => { await store.add(exampleDiagram()); select([], []); }}><FilePlus2 size={16} />Programming example</button><p>Drag between connection points to link shapes.</p></div>
       </aside>
       <section ref={canvas} className={`canvas canvas-tool-${effectiveTool}${palettePreview && !readonly ? ' canvas-drop-ready' : ''}`} aria-label="Diagram canvas">
-        <ReactFlow<FlowNode> nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={changes => { for (const change of changes) if (change.type === 'select') setSelectedEdges(prev => change.selected ? [...new Set([...prev, change.id])] : prev.filter(id => id !== change.id)); }}
-          onSelectionChange={onSelectionChange} onNodeDragStart={event => { bypassSnapping.current = 'altKey' in event && event.altKey; }}
+        <ReactFlow<FlowNode> nodes={displayNodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={changes => { for (const change of changes) if (change.type === 'select') setSelectedEdges(prev => change.selected ? [...new Set([...prev, change.id])] : prev.filter(id => id !== change.id)); }}
+          onSelectionChange={onSelectionChange} onNodeClick={(_, node) => { if (node.data.model.groupId) select([node.id], []); }} onNodeDragStart={event => { bypassSnapping.current = 'altKey' in event && event.altKey; }}
           onConnect={connection => connect(connection)} onReconnect={(old, connection) => updateEdge(old.id, { source: connection.source, target: connection.target, sourceHandle: (connection.sourceHandle as HandleId) ?? 'bottom', targetHandle: (connection.targetHandle as HandleId) ?? 'top' })}
           onNodeDoubleClick={(_, node) => { select([node.id], []); setTimeout(() => document.getElementById('node-label')?.focus(), 0); }}
           connectionMode={ConnectionMode.Loose} nodesDraggable={!readonly && !spaceHeld && (tool === 'pan' || tool === 'select')} nodesConnectable={!readonly && (effectiveTool === 'pan' || effectiveTool === 'select')} edgesReconnectable={!readonly && (effectiveTool === 'pan' || effectiveTool === 'select')} deleteKeyCode={null} multiSelectionKeyCode={['Meta', 'Control', 'Shift']} selectionOnDrag={effectiveTool === 'select'} selectionMode={SelectionMode.Partial} panOnDrag={effectiveTool === 'pan' ? [0, 1, 2] : [1, 2]} panActivationKeyCode="Space" selectionKeyCode="Shift" zoomOnDoubleClick={false} minZoom={.1} maxZoom={4} snapToGrid={false} snapGrid={[16,16]} defaultViewport={doc.viewport} onMove={(_, vp) => setZoom(vp.zoom)} onMoveEnd={moveEnd} onlyRenderVisibleElements={false}>
@@ -382,21 +537,27 @@ function Workspace() {
       </section>
       {hasSelection && <aside className="properties-panel" aria-label="Properties"><div className="panel-title"><h2>{chosenNode ? NODE_TYPE_LABELS[chosenNode.type] : chosenEdge ? 'Connection' : 'Selection'}</h2><button className="icon-button" aria-label="Clear selection" onClick={() => select([], [])}><X size={16} /></button></div>
         {chosenNode && <div className="property-fields" key={chosenNode.id}>
-          <label>Label<textarea id="node-label" aria-label="Node label" defaultValue={chosenNode.label} key={`${chosenNode.id}:${chosenNode.label}`} maxLength={4000} disabled={readonly} onBlur={e => { if (e.target.value !== chosenNode.label) updateNode(chosenNode.id, growLabel(chosenNode, e.target.value)); }} rows={4} /></label>
-          <label>Notes<textarea aria-label="Notes" defaultValue={chosenNode.notes} key={`${chosenNode.id}:${chosenNode.notes}`} maxLength={20000} disabled={readonly} onBlur={e => { if (e.target.value !== chosenNode.notes) updateNode(chosenNode.id, { notes: e.target.value }); }} rows={4} /></label><p className="field-hint">Notes are saved in JSON. They do not appear on the canvas or PNG.</p>
-          <fieldset className="color-options" disabled={readonly}><legend>Color</legend>{COLORS.map(color => <button key={color} className="color-choice" aria-label={COLOR_LABELS[color]} aria-pressed={chosenNode.style.color === color} style={{ background: colorValues(color).fill, borderColor: colorValues(color).stroke }} onClick={() => updateNode(chosenNode.id, { style: { color } })}>{chosenNode.style.color === color && <Check size={14} />}</button>)}</fieldset>
+          <label>Label<textarea id="node-label" aria-label="Node label" defaultValue={chosenNode.label} key={`${chosenNode.id}:${chosenNode.label}`} maxLength={4000} disabled={nodeReadonly} onBlur={e => { if (e.target.value !== chosenNode.label) updateNode(chosenNode.id, growLabel(chosenNode, e.target.value)); }} rows={4} /></label>
+          <label>Notes<textarea aria-label="Notes" defaultValue={chosenNode.notes} key={`${chosenNode.id}:${chosenNode.notes}`} maxLength={20000} disabled={nodeReadonly} onBlur={e => { if (e.target.value !== chosenNode.notes) updateNode(chosenNode.id, { notes: e.target.value }); }} rows={4} /></label><p className="field-hint">Notes are saved in JSON. They do not appear on the canvas or PNG.</p>
+          <fieldset className="color-options" disabled={nodeReadonly}><legend>Color</legend>{COLORS.map(color => <button key={color} className="color-choice" aria-label={COLOR_LABELS[color]} aria-pressed={chosenNode.style.color === color} style={{ background: colorValues(color).fill, borderColor: colorValues(color).stroke }} onClick={() => updateNode(chosenNode.id, { style: { color } })}>{chosenNode.style.color === color && <Check size={14} />}</button>)}</fieldset>
           <button className="button" disabled={doc.nodes.length < 2 || readonly} onClick={startConnection}><Link2 size={15} />Connect node</button>
         </div>}
         {chosenEdge && <div className="property-fields" key={chosenEdge.id}><label>Label<textarea aria-label="Connection label" defaultValue={chosenEdge.label} key={`${chosenEdge.id}:${chosenEdge.label}`} maxLength={4000} rows={3} disabled={readonly} onBlur={e => { if (e.target.value !== chosenEdge.label) updateEdge(chosenEdge.id, { label: e.target.value }); }} /></label>
           {(['source','target'] as const).map(side => <div className="connection-end" key={side}><label>{side === 'source' ? 'From' : 'To'}<select aria-label={side === 'source' ? 'Connection source' : 'Connection target'} value={chosenEdge[side]} disabled={readonly} onChange={e => updateEdge(chosenEdge.id, { [side]: e.target.value })}>{doc.nodes.map(n => <option key={n.id} value={n.id}>{n.label.slice(0,50) || NODE_TYPE_LABELS[n.type]}</option>)}</select></label><label>Connection point<select aria-label={`${side} handle`} value={chosenEdge[`${side}Handle`]} disabled={readonly} onChange={e => updateEdge(chosenEdge.id, { [`${side}Handle`]: e.target.value as HandleId })}>{HANDLES.map(h => <option key={h} value={h}>{h}</option>)}</select></label></div>)}
         </div>}
+        {chosenEdge && <div className="property-fields"><button className="button" aria-label="Reset connection route" disabled={readonly || !chosenEdge.waypoints?.length} onClick={() => updateEdge(chosenEdge.id, { waypoints: [] })}>Reset route</button><p className="field-hint">Drag a point on the selected connection to change its route. Double-click a bend to remove it.</p></div>}
+        {selectedNodes.length > 0 && <div className="selection-tools">
+          <div className="selection-actions"><button className="button" aria-label="Group selection" disabled={readonly || selectedLocked || selectedUnits < 2} onClick={() => groupSelected()}><Group size={15} />Group</button><button className="button" aria-label="Ungroup selection" disabled={readonly || selectedLocked || !selectedModels.some(node => node.groupId)} onClick={() => groupSelected(true)}><Ungroup size={15} />Ungroup</button></div>
+          <div className="selection-actions"><button className="button" aria-label="Lock selection" disabled={readonly || selectedModels.every(node => lockedIds.has(node.id))} onClick={() => lockSelected(true)}><LockKeyhole size={15} />Lock</button><button className="button" aria-label="Unlock selection" disabled={readonly || !selectedLocked} onClick={() => lockSelected(false)}><Unlock size={15} />Unlock</button></div>
+          {selectedUnits > 1 && <><h3>Align</h3><div className="align-buttons">{(['left', 'center', 'right', 'top', 'middle', 'bottom'] as const).map(mode => <button className="button" key={mode} aria-label={`Align ${mode}`} disabled={readonly} onClick={() => arrangeSelected(mode)}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}</div><h3>Distribute</h3><div className="selection-actions"><button className="button" aria-label="Distribute horizontally" disabled={readonly || selectedUnits < 3} onClick={() => arrangeSelected('horizontal')}>Horizontally</button><button className="button" aria-label="Distribute vertically" disabled={readonly || selectedUnits < 3} onClick={() => arrangeSelected('vertical')}>Vertically</button></div></>}
+        </div>}
         {!chosenNode && !chosenEdge && <p className="selection-count">{selectedNodes.length} shapes · {selectedEdges.length} connections</p>}
-        <div className="properties-actions"><button className="button" onClick={duplicate} disabled={!selectedNodes.length || readonly}><Copy size={15} />Duplicate</button><button className="button danger" onClick={deleteSelection} disabled={readonly}><Trash2 size={15} />Delete</button></div>
+        <div className="properties-actions"><button className="button" onClick={duplicate} disabled={!selectedNodes.length || readonly}><Copy size={15} />Duplicate</button><button className="button danger" onClick={deleteSelection} disabled={readonly || selectedLocked}><Trash2 size={15} />Delete</button></div>
       </aside>}
     </div>
     {paletteLabel && !readonly && <div className="palette-drag-label" aria-hidden="true" style={{ left: paletteLabel.x + 14, top: paletteLabel.y + 14 }}>{NODE_TYPE_LABELS[paletteLabel.kind]}</div>}
     <footer className="editor-footer"><span>{doc.nodes.length} shapes<span className="footer-dot">·</span>{doc.edges.length} connections{doc.drawings.length > 0 && <><span className="footer-dot">·</span>{doc.drawings.length} strokes</>}</span><span className="footer-notice" aria-live="polite">{notice}</span><button className="text-button" onClick={() => setModal('help')}>Local storage & help</button></footer>
-    {modal === 'help' && <Modal title="Help" onClose={() => setModal(null)}><div className="help-content"><h3>Drawing</h3><p>Click a sidebar shape to add it, or drag it onto the canvas to preview and place it. Drag canvas shapes to move them. Alignment guides snap nearby edges and centers; hold Option (Alt) to bypass snapping. Auto arrange positions the whole diagram from top to bottom and can be undone in one step. Click a label to select its shape and edit it in Properties. Changes apply when you leave the field.</p><p>Drag between connection points, or use Connect nodes to choose endpoints and labels. Multiple branches, merges, and multi-node loops work. Same-node loops are not supported.</p><h3>Freehand drawing</h3><p>Choose Draw to sketch with a mouse, touch, or pen. Supported pens vary stroke width with pressure. Eraser removes whole strokes; each gesture can be undone. Hold Space to pan while drawing. Choose Dot grid, Graph paper, or Blank from Background. Drawings and backgrounds are saved and included in PNG exports.</p><h3>Canvas and keyboard</h3><p>Drag empty canvas to pan. Use Select or hold Shift to select a group. Hold Space to pan from any tool. Use the mouse wheel to zoom. ⌘/Ctrl + click or Shift + click adds to a selection. Focus a shape and use arrow keys to move it.</p><dl className="shortcuts"><dt>Undo / redo</dt><dd>⌘/Ctrl Z / Shift Z</dd><dt>Duplicate</dt><dd>⌘/Ctrl D</dd><dt>Select all</dt><dd>⌘/Ctrl A</dd><dt>Delete selection</dt><dd>Delete / Backspace</dd></dl><h3>Local files</h3><p>Diagrams save in this browser on this device. Clearing browser data or storage eviction can remove them. Export JSON for an editable backup; import always creates a new document. PNG includes the whole diagram.</p><p>Editing and saving continue if you disconnect after loading. Reopening offline is not supported yet. Nothing in a diagram is uploaded.</p><Link href="/privacy" target="_blank">Privacy and storage details</Link><p><a href="/licenses/elkjs.txt" target="_blank" rel="noreferrer">Layout engine license and source</a></p></div></Modal>}
+    {modal === 'help' && <Modal title="Help" onClose={() => setModal(null)}><div className="help-content"><h3>Drawing</h3><p>Click a sidebar shape to add it, or drag it onto the canvas to preview and place it. Drag canvas shapes to move them. Select one shape and drag a corner to resize it; labels reflow and connections follow. Each resize is one undo step. Press Escape before releasing to cancel. Alignment guides snap nearby edges and centers; hold Option (Alt) to bypass snapping. Copy and paste shapes with ⌘/Ctrl C and V, including between documents. Group a selection with ⌘/Ctrl G; Shift adds Ungroup. Lock shapes to prevent edits. Align and Distribute controls appear for multiple selected shapes. Auto arrange positions the whole diagram from top to bottom and can be undone in one step. Click a label to select its shape and edit it in Properties. Changes apply when you leave the field.</p><p>Select a connection and drag its circular controls to add bends; drag square controls to move bends, or double-click to remove them. Automatic routes avoid other shapes when space permits. Drag between connection points, or use Connect nodes to choose endpoints and labels. Multiple branches, merges, and multi-node loops work. Same-node loops are not supported.</p><h3>Freehand drawing</h3><p>Choose Draw to sketch with a mouse, touch, or pen. Supported pens vary stroke width with pressure. Eraser removes whole strokes; each gesture can be undone. Hold Space to pan while drawing. Choose Dot grid, Graph paper, or Blank from Background. Drawings and backgrounds are saved and included in PNG exports.</p><h3>Canvas and keyboard</h3><p>Drag empty canvas to pan. Use Select or hold Shift to select a group. Hold Space to pan from any tool. Use the mouse wheel to zoom. ⌘/Ctrl + click or Shift + click adds to a selection. Focus a shape and use arrow keys to move it.</p><dl className="shortcuts"><dt>Undo / redo</dt><dd>⌘/Ctrl Z / Shift Z</dd><dt>Duplicate</dt><dd>⌘/Ctrl D</dd><dt>Select all</dt><dd>⌘/Ctrl A</dd><dt>Delete selection</dt><dd>Delete / Backspace</dd></dl><h3>Local files</h3><p>Diagrams save in this browser on this device. Clearing browser data or storage eviction can remove them. Export JSON for an editable backup; import always creates a new document. PNG and SVG include the whole diagram. SVG stays vector; PDF fits a high-resolution image onto an A4 page.</p><p>Editing and saving continue if you disconnect after loading. Reopening offline is not supported yet. Nothing in a diagram is uploaded.</p><Link href="/privacy" target="_blank">Privacy and storage details</Link><p><a href="/licenses/elkjs.txt" target="_blank" rel="noreferrer">Layout engine license and source</a></p></div></Modal>}
     {modal === 'documents' && <Modal title="Documents" onClose={() => setModal(null)}><div className="document-actions"><button className="button button-dark" disabled={store.busy} onClick={async () => { await store.add(newDiagram()); setModal(null); }}><Plus size={16} />New diagram</button><button className="button" disabled={store.busy} onClick={async () => { await store.saveCopy(); setModal(null); }}>Duplicate document</button><button className="button danger" disabled={readonly} onClick={() => setModal('delete')}>Delete document</button></div><p className="storage-copy">Saved in this browser. Keep JSON backups before clearing browser data.</p><ul className="document-list">{store.documents.map(d => <li key={d.documentId}><button className={d.documentId === doc.documentId ? 'current-document' : ''} disabled={store.busy} onClick={async () => { await store.switchTo(d.documentId); setModal(null); }}><Files size={18} /><span><strong>{d.title}</strong><small>{d.nodes.length} shapes · {new Date(d.updatedAt).toLocaleDateString()}</small></span>{d.documentId === doc.documentId && <Check size={16} />}</button></li>)}</ul><button className="button" onClick={() => { setModal(null); setTimeout(() => document.querySelector<HTMLInputElement>('[aria-label="Diagram title"]')?.focus(),0); }} disabled={readonly}>Rename current document</button></Modal>}
     {modal === 'delete' && <Modal title="Delete document" onClose={() => setModal(null)}><p>Delete “{doc.title}” from this device? This cannot be undone. Download JSON first if you want a backup.</p><div className="dialog-actions"><button className="button" onClick={exportJSON}>Download JSON</button><button className="button" onClick={() => setModal(null)}>Cancel</button><button className="button button-dark" disabled={store.busy} onClick={async () => { await store.remove(); setModal(null); }}>Delete permanently</button></div></Modal>}
     {modal === 'connection' && <Modal title="Connect nodes" onClose={() => setModal(null)}><form className="connection-form" onSubmit={e => { e.preventDefault(); if (connectionDraft.source === connectionDraft.target) return; connect(connectionDraft, connectionDraft.label); setModal(null); }}>

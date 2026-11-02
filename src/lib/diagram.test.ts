@@ -2,6 +2,28 @@ import { describe, expect, it } from 'vitest';
 import { copyDiagram, createNode, DiagramValidationError, duplicateSelection, exampleDiagram, MAX_IMPORT_BYTES, newDiagram, NODE_TYPES, parseDiagram, serializeDiagram, validateDiagram } from './diagram';
 
 describe('portable diagrams', () => {
+  it('round trips groups, locks and bends, and duplicates groups independently', () => {
+    const doc = exampleDiagram();
+    doc.nodes[0].groupId = doc.nodes[1].groupId = 'pair';
+    doc.nodes[0].locked = true;
+    doc.edges[0].waypoints = [{ x: -40, y: 100 }];
+    expect(parseDiagram(serializeDiagram(doc))).toEqual(doc);
+    const duplicated = duplicateSelection(doc, doc.nodes.slice(0, 2).map(node => node.id));
+    expect(duplicated.nodes[6].groupId).toBe(duplicated.nodes[7].groupId);
+    expect(duplicated.nodes[6].groupId).not.toBe('pair');
+    expect(duplicated.edges.at(-1)!.waypoints).toEqual([{ x: -8, y: 132 }]);
+  });
+
+  it('rejects malformed groups, locks and connection bends', () => {
+    const doc = exampleDiagram();
+    for (const fields of [{ groupId: '' }, { locked: 'yes' }]) {
+      expect(() => validateDiagram({ ...doc, nodes: [{ ...doc.nodes[0], ...fields }, ...doc.nodes.slice(1)] })).toThrow(DiagramValidationError);
+    }
+    for (const waypoints of [[{ x: Infinity, y: 0 }], [{ x: 0, y: 0, selected: true }], Array(65).fill({ x: 0, y: 0 })]) {
+      expect(() => validateDiagram({ ...doc, edges: [{ ...doc.edges[0], waypoints }] })).toThrow(DiagramValidationError);
+    }
+  });
+
   it('opens older files with no drawings or background setting', () => {
     const value = JSON.parse(JSON.stringify(exampleDiagram()));
     delete value.drawings;

@@ -1,6 +1,6 @@
 # Flowchart Studio
 
-A free, local browser editor for programming flowcharts. Draw branches and loops, save projects on this device, and export editable JSON or PNG. Phase 1 includes no accounts, cloud storage, payments, analytics, or external APIs.
+A free, local browser editor for programming flowcharts. Draw branches and loops, save projects on this device, and export editable JSON, PNG, SVG, or PDF. Phase 1 includes no accounts, cloud storage, payments, analytics, or external APIs.
 
 ## Run locally
 
@@ -28,13 +28,17 @@ Browser tests require Playwright’s Chromium and WebKit browsers (`npx playwrig
 
 - Immediate guest canvas; click or drag any of the 32 searchable, categorized sidebar shapes onto the canvas with a shape-only placement preview; multiline labels and notes; five color choices.
 - Drag empty canvas to pan; use Select or Shift-drag for box selection, and Space for temporary panning from any tool. Pan, zoom, fit, grid snapping and edge/center alignment guides; multi-selection; duplicate/delete; directed labeled connections, merges and multi-node loops. Reconnect by dragging an endpoint or changing its node/handle in Properties.
-- Undo/redo for completed edits and movement; Command shortcuts on Mac and Control shortcuts elsewhere for select all, duplicate and undo/redo, with text-field focus respected. Command/Control-click adds shapes to a selection.
+- Corner resizing on a single selected shape, with label-fit minimums and a 2,000-pixel maximum per dimension. Connections follow live; each completed resize is one undo step. Escape cancels an unfinished resize.
+- Copy/cut/paste within and between documents, preserving internal connections, groups and bends with fresh IDs. System clipboard access falls back to the current editor when unavailable.
+- Groups move and align as units. Locking a member protects the whole group from editing and layout movement. Align to six edges/centers or distribute three or more units with equal horizontal/vertical gaps.
+- Undo/redo for completed edits and movement; Command shortcuts on Mac and Control shortcuts elsewhere for select all, duplicate and undo/redo, plus copy/cut/paste and group/ungroup, with text-field focus respected. Command/Control-click adds shapes to a selection.
 - Alignment snaps nearby edges and centers without changing group offsets. Toggle **Align shapes** to disable it, or hold Option/Alt to bypass both alignment and grid snapping.
-- **Auto arrange** positions the whole flowchart and adjusts connection sides. It runs locally and is undoable in one step. It preserves the graph, labels, notes, dimensions, appearance and freehand strokes. The main forward path stays straight where possible, side branches use separate handles, and feedback edges favor outside routes.
+- Select a connection to insert or drag bend points; double-click a bend to remove it, or reset the route. Keyboard arrow keys move a focused bend. Automatic orthogonal routing avoids other shapes when space permits.
+- **Auto arrange** positions the whole flowchart and adjusts connection sides. It runs locally and is undoable in one step. It preserves the graph, labels, notes, dimensions, appearance and freehand strokes. Groups keep their internal positions and bends, and locked groups stay fixed. Editable external routes are reset to automatic routes. The main forward path stays straight where possible, side branches use separate handles, and feedback edges favor outside routes.
 - **Draw** supports mouse, touch, and pen Pointer Events with coalesced samples and pressure-sensitive width. **Eraser** removes whole strokes. Each gesture is one undo step; canceled gestures are discarded. Pen input takes priority over simultaneous touch. Brush width and color are adjustable.
-- **Background** selects Dot grid, Graph paper, or Blank. The choice and freehand drawings persist in JSON and appear in PNG exports.
+- **Background** selects Dot grid, Graph paper, or Blank. The choice and freehand drawings persist in JSON and appear in image and PDF exports.
 - New, rename, duplicate, delete-confirmation and a device-local document list. Autosave restores the last document, checks revisions across tabs, and preserves work on storage failure.
-- Versioned editable JSON import/export and full-diagram PNG export. Imported diagrams get a new document identity while preserving graph IDs and content.
+- Versioned editable JSON import/export, vector SVG, full-diagram PNG and one-page A4 PDF export. Imported diagrams get a new document identity while preserving graph IDs and content.
 - Blank canvas and an editable order-processing logic example with Yes/No branches, a merge at review, and a correction loop.
 - Public homepage and privacy explanation, metadata, structured data, sitemap and crawler rules. No editor bundle prefetch from the homepage.
 
@@ -45,13 +49,13 @@ Browser tests require Playwright’s Chromium and WebKit browsers (`npx playwrig
 - Diagram data is separate from the rendered canvas. The model validates imports and supports 32 node types with shared shape outlines, text regions, and connection anchors. Legacy JSON files without drawings or a background choice still open.
 - Browser persistence uses IndexedDB and revision checks in the write transaction to detect a conflicting update from another tab. Save failures and conflicts are surfaced in the editor.
 - Automatic arrangement uses the local ELK engine plus flowchart constraints. Its chunk loads on first use; reconnect before first use if it has not loaded yet. Layout never uploads a diagram. The [ELK license and source notice](public/licenses/elkjs.txt) is included.
-- PNG export renders the diagram through a shared SVG representation and rasterizes it in a browser canvas. There is no screenshot or export service.
+- SVG export uses shared shape and connection geometry. PNG rasterizes that scene; PDF embeds a 300 dpi browser-rendered JPEG on an A4 page to preserve Unicode text. SVG is the scalable vector format. There is no screenshot or export service.
 
 ## Local data and technical limits
 
 Projects belong to the current origin and browser profile. Clearing site data, private browsing limits, browser eviction, or device failure can remove them. Export JSON backups. The loaded editor can work without a connection, but there is no service worker or guaranteed offline reopening.
 
-JSON import accepts files up to 10 MiB, with at most 5,000 nodes, 10,000 edges, 1,000 drawing strokes and 200,000 drawing points per diagram. Individual strokes contain up to 20,000 points; longer live gestures are resampled. These are defensive technical caps, not paid tiers. Direct self-connections are rejected; loops through multiple nodes are supported. Automatic arrangement uses deterministic layout heuristics; it does not guarantee a globally optimal arrangement. PNG export limits output to 16 million pixels and 8,192 pixels per dimension, downscaling when necessary. Extremely large extents that would make text unreadable fail clearly; JSON remains available. Routing is orthogonal and follows endpoints; it does not automatically avoid unrelated shapes. Undo retains up to 100 completed operations. Labels commit when their field loses focus; notes are JSON metadata and are not drawn in PNG.
+JSON import accepts files up to 10 MiB, with at most 5,000 nodes, 10,000 edges, 1,000 drawing strokes and 200,000 drawing points per diagram. Individual strokes contain up to 20,000 points; longer live gestures are resampled. These are defensive technical caps, not paid tiers. Direct self-connections are rejected; loops through multiple nodes are supported. Automatic arrangement uses deterministic layout heuristics; it does not guarantee a globally optimal arrangement. PNG export limits output to 16 million pixels and 8,192 pixels per dimension, downscaling when necessary. Extremely large extents that would make text unreadable fail clearly; JSON remains available. Connections support up to 64 manual bend points. Routing is orthogonal with 16-pixel shape clearance; enclosed endpoints and searches exceeding 180,000 grid points use a deterministic fallback that can cross shapes. PDF fits the whole diagram on one A4 page, so very large diagrams may have small text; SVG preserves full vector detail. Undo retains up to 100 completed operations. Labels commit when their field loses focus; notes are JSON metadata and are not drawn in image or PDF exports.
 
 The [privacy page](http://localhost:3000/privacy) describes local storage, import/export behavior, and ordinary website host request logs.
 
@@ -73,14 +77,14 @@ References: [Next.js metadata](https://nextjs.org/docs/app/getting-started/metad
 
 Phase 2 requires a separate request after review: optional free sign-in with Supabase, explicit opt-in cloud copies with owner authorization and conflict recovery, and Stripe subscriptions at the configured prices. Billing test mode, webhook verification, quotas, operating costs, and a retention policy must be reviewed before live billing. Local editing, saving, imports, and exports remain free.
 
-Later editor work includes diagram search, resizing and distribution, SVG/PDF and scoped Mermaid support, additional templates and practical guides, and tested offline reopening. Alignment guides and one-click arrangement are already implemented. Real-time collaboration and AI generation are separate later decisions, with no integrations in this release.
+Later editor work includes diagram search and scoped Mermaid support, additional templates and practical guides, and tested offline reopening. Alignment guides and one-click arrangement are already implemented. Real-time collaboration and AI generation are separate later decisions, with no integrations in this release.
 
 ## Verification
 
 Verified on November 2, 2026 using macOS arm64, Node.js 22.23.4, Next.js 16.4.4, Chromium 156.0.8078.4 and Playwright WebKit 27.2. Browsers tested the local production build, without external API keys.
 
-- `npm run typecheck`, `npm run lint`, `npm test`, and the production build pass. Unit tests: 131 passed across serialization/validation, history, IndexedDB conflicts/failures, all 32 shape contours and text regions, alignment, automatic layout, drawing pressure geometry and export bounds.
-- Browser tests: 82 unique cases across Chromium and WebKit, run in focused groups. Coverage includes saved guest editing, drag/drop and shape-only previews, alignment and modifier keys, literal Mac Command shortcuts, default-layout readability and undo, all 32 shapes, background persistence, freehand save/erase/undo/PNG, and scripted pressure input. Existing checks cover document switching, old and new JSON round trips, malformed imports, offscreen PNG content, cross-tab conflicts, failed/quota-limited storage, offline editing, and 200-node diagrams.
+- `npm run typecheck`, `npm run lint`, `npm test`, and the production build pass. Unit tests: 175 passed across serialization/validation, history, IndexedDB conflicts/failures, all 32 shape contours and text regions, alignment, automatic layout, drawing pressure geometry, grouping/locking, clipboard fragments, orthogonal routing, PDF structure and export bounds.
+- Browser tests: 110 unique cases across Chromium and WebKit, with affected checks repeated after final fixes. Coverage includes corner resizing, connector bend editing and cancellation, copy/cut/paste between documents, groups, locks, alignment/distribution, SVG/PDF downloads, saved guest editing, drag/drop and shape-only previews, alignment and modifier keys, literal Mac Command shortcuts, default-layout readability and undo, all 32 shapes, background persistence, freehand save/erase/undo/PNG, and scripted pressure input. Existing checks cover document switching, old and new JSON round trips, malformed imports, offscreen PNG content, cross-tab conflicts, failed/quota-limited storage, offline editing, and 200-node diagrams.
 - Public HTML works with JavaScript disabled; metadata, free-only structured data, robots and the two sitemap entries agree. Instrumented editing and JSON export made zero HTTP requests after loading. Both engines passed automated axe checks with no serious/critical WCAG A/AA violations in the public page, Documents dialog and selected-node editor. Mobile checks at 390×844 passed collapsible controls, no horizontal overflow, and Help keyboard-focus restoration. Automated checks do not establish complete accessibility conformance.
 
 

@@ -1,6 +1,8 @@
 import type { Diagram, DiagramNode } from './diagram';
+import { jpegToPdf, pdfLayout } from './pdf';
 import { drawingBounds, drawingPath } from './drawing';
-import { colorValues, edgeRoute, handlePoint, labelWidth, nodePath, nodeTextBox, wrapLabel } from './geometry';
+import { routeDiagramEdge } from './routing';
+import { colorValues, labelWidth, nodePath, nodeTextBox, wrapLabel } from './geometry';
 
 const FONT_SIZE = 14;
 const LINE_HEIGHT = 20;
@@ -24,7 +26,7 @@ function scene(diagram: Diagram) {
   const nodes = diagram.nodes;
   for (const node of nodes) {
     if (![node.position.x, node.position.y, node.width, node.height].every(Number.isFinite) || node.width <= 0 || node.height <= 0) {
-      throw new Error('A shape has invalid dimensions. Save JSON, then correct the shape before exporting PNG.');
+      throw new Error('A shape has invalid dimensions. Save JSON, then correct the shape before exporting.');
     }
   }
   const byId = new Map(nodes.map(node => [node.id, node]));
@@ -32,13 +34,13 @@ function scene(diagram: Diagram) {
     const source = byId.get(edge.source);
     const target = byId.get(edge.target);
     if (!source || !target) return [];
-    const route = edgeRoute(handlePoint(source, edge.sourceHandle), handlePoint(target, edge.targetHandle), edge.sourceHandle, edge.targetHandle);
+    const route = routeDiagramEdge(edge, source, target, nodes);
     return [{ edge, route, lines: edge.label ? wrapLabel(edge.label, 220, FONT_SIZE) : [] }];
   });
   const drawings = (diagram.drawings ?? []).filter(stroke => stroke.points.length > 0);
   for (const stroke of drawings) {
     if (!Number.isFinite(stroke.width) || stroke.width <= 0 || stroke.points.some(point => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
-      throw new Error('A drawing has invalid coordinates. Correct the drawing before exporting PNG.');
+      throw new Error('A drawing has invalid coordinates. Correct the drawing before exporting.');
     }
   }
   return { nodes, edges, drawings };
@@ -120,7 +122,7 @@ function renderSvg(diagram: Diagram, rasterSize?: { width: number; height: numbe
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${rasterSize?.width ?? bounds.width}" height="${rasterSize?.height ?? bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"><defs>${markers}${backgroundPatterns}</defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="#ffffff"/>${backgroundRect}${drawings}${edges}${nodes}${labels}</svg>`;
 }
 
-/** An internal, self-contained render source for PNG; contains no HTML. */
+/** Self-contained vector SVG for downloads and raster rendering; contains no HTML. */
 export function diagramToSvg(diagram: Diagram): string {
   return renderSvg(diagram);
 }
@@ -150,6 +152,10 @@ export function downloadJson(diagram: Diagram): void {
   download(new Blob([JSON.stringify(diagram, null, 2) + '\n'], { type: 'application/json' }), filename(diagram.title, 'json'));
 }
 
+export function downloadSvg(diagram: Diagram): void {
+  download(new Blob([diagramToSvg(diagram)], { type: 'image/svg+xml;charset=utf-8' }), filename(diagram.title, 'svg'));
+}
+
 export async function downloadPng(diagram: Diagram): Promise<void> {
   const bounds = exportBounds(diagram);
   if (Math.max(bounds.width, bounds.height) > 5_000_000 || !Number.isFinite(bounds.width * bounds.height)) {
@@ -161,28 +167,44 @@ export async function downloadPng(diagram: Diagram): Promise<void> {
   }
   const width = Math.max(1, Math.floor(bounds.width * scale));
   const height = Math.max(1, Math.floor(bounds.height * scale));
+  const blob = await rasterize(diagram, width, height, 'PNG');
+  download(blob, filename(diagram.title, 'png'));
+}
+
+/** A high-resolution image PDF; SVG is available when vector output is required. */
+export async function downloadPdf(diagram: Diagram): Promise<void> {
+  const bounds = exportBounds(diagram);
+  const layout = pdfLayout(bounds.width, bounds.height);
+  const blob = await rasterize(diagram, layout.pixelWidth, layout.pixelHeight, 'PDF');
+  const bytes = jpegToPdf(new Uint8Array(await blob.arrayBuffer()), layout);
+  download(new Blob([bytes], { type: 'application/pdf' }), filename(diagram.title, 'pdf'));
+}
+
+async function rasterize(diagram: Diagram, width: number, height: number, format: 'PNG' | 'PDF'): Promise<Blob> {
+  if (width > MAX_DIMENSION || height > MAX_DIMENSION || width * height > MAX_PIXELS) {
+    throw new Error(`This diagram is too large to render as ${format}. Try exporting SVG.`);
+  }
   const svg = renderSvg(diagram, { width, height });
-  if (svg.length > 16_000_000) throw new Error('This diagram is too large to render as PNG. Export JSON to preserve the complete diagram.');
+  if (svg.length > 16_000_000) throw new Error(`This diagram is too large to render as ${format}. Export SVG or JSON to preserve the complete diagram.`);
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
   const canvas = document.createElement('canvas');
   try {
     const image = new Image();
     image.decoding = 'async';
     await new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => { image.onload = null; image.onerror = null; reject(new Error('PNG rendering timed out. Try again, or export JSON.')); }, 20_000);
+      const timeout = window.setTimeout(() => { image.onload = null; image.onerror = null; reject(new Error(`${format} rendering timed out. Try again, or export SVG.`)); }, 20_000);
       image.onload = () => { window.clearTimeout(timeout); resolve(); };
-      image.onerror = () => { window.clearTimeout(timeout); reject(new Error('The browser could not render this PNG. Export JSON to preserve the diagram.')); };
+      image.onerror = () => { window.clearTimeout(timeout); reject(new Error(`The browser could not render this ${format}. Try exporting SVG.`)); };
       image.src = url;
     });
     canvas.width = width;
     canvas.height = height;
     const context = canvas.getContext('2d');
-    if (!context) throw new Error('The browser could not create a PNG canvas. Try exporting JSON.');
+    if (!context) throw new Error(`The browser could not create a ${format} canvas. Try exporting SVG.`);
     context.fillStyle = '#ffffff';
     context.fillRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error('The browser could not finish the PNG. Try exporting JSON.')), 'image/png'));
-    download(blob, filename(diagram.title, 'png'));
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error(`The browser could not finish the ${format}. Try exporting SVG.`)), format === 'PDF' ? 'image/jpeg' : 'image/png', 0.98));
   } finally {
     URL.revokeObjectURL(url);
     canvas.width = 0;

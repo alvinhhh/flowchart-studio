@@ -19,6 +19,8 @@ export interface DiagramNode {
   label: string;
   notes: string;
   style: { color: ColorName };
+  groupId?: string;
+  locked?: boolean;
 }
 export interface DiagramEdge {
   id: string;
@@ -28,6 +30,7 @@ export interface DiagramEdge {
   targetHandle: HandleId;
   label: string;
   style: { color: ColorName };
+  waypoints?: { x: number; y: number }[];
 }
 export interface Diagram {
   schemaVersion: 1;
@@ -109,24 +112,33 @@ export function validateDiagram(value: unknown): Diagram {
   }
   const nodes: DiagramNode[] = (doc.nodes as unknown[]).map((value, index) => {
     const path = `nodes[${index}]`;
-    const node = object(value, ['id', 'type', 'position', 'width', 'height', 'label', 'notes', 'style'], path);
+    const node = object(value, ['id', 'type', 'position', 'width', 'height', 'label', 'notes', 'style', 'groupId', 'locked'], path, ['groupId', 'locked']);
+    if (node.locked !== undefined && typeof node.locked !== 'boolean') fail(`${path}.locked must be true or false.`);
     const position = object(node.position, ['x', 'y'], `${path}.position`);
     return {
       id: id(node.id, `${path}.id`), type: choice(node.type, NODE_TYPES, `${path}.type`),
       position: { x: number(position.x, -100000, 100000, `${path}.position.x`), y: number(position.y, -100000, 100000, `${path}.position.y`) },
       width: number(node.width, 1, 2000, `${path}.width`), height: number(node.height, 1, 2000, `${path}.height`),
       label: string(node.label, 4000, `${path}.label`), notes: string(node.notes, 20000, `${path}.notes`), style: color(node.style, `${path}.style`),
+      ...(node.groupId === undefined ? {} : { groupId: string(node.groupId, 200, `${path}.groupId`, true) }),
+      ...(node.locked === undefined ? {} : { locked: node.locked as boolean }),
     };
   });
   const nodeIds = new Set(nodes.map((node) => node.id));
   const edges: DiagramEdge[] = (doc.edges as unknown[]).map((value, index) => {
     const path = `edges[${index}]`;
-    const edge = object(value, ['id', 'source', 'target', 'sourceHandle', 'targetHandle', 'label', 'style'], path);
+    const edge = object(value, ['id', 'source', 'target', 'sourceHandle', 'targetHandle', 'label', 'style', 'waypoints'], path, ['waypoints']);
+    if (edge.waypoints !== undefined && (!Array.isArray(edge.waypoints) || edge.waypoints.length > 64)) fail(`${path}.waypoints must contain at most 64 bend points.`);
+    const waypoints = edge.waypoints === undefined ? undefined : (edge.waypoints as unknown[]).map((value, index) => {
+      const pointPath = `${path}.waypoints[${index}]`;
+      const point = object(value, ['x', 'y'], pointPath);
+      return { x: number(point.x, -100000, 100000, `${pointPath}.x`), y: number(point.y, -100000, 100000, `${pointPath}.y`) };
+    });
     const source = string(edge.source, 200, `${path}.source`, true);
     const target = string(edge.target, 200, `${path}.target`, true);
     if (!nodeIds.has(source) || !nodeIds.has(target)) fail(`${path} references a missing node.`);
     if (source === target) fail(`${path}: connections back to the same node are not supported in this version. Connect through another node.`);
-    return { id: id(edge.id, `${path}.id`), source, target, sourceHandle: choice(edge.sourceHandle, HANDLES, `${path}.sourceHandle`), targetHandle: choice(edge.targetHandle, HANDLES, `${path}.targetHandle`), label: string(edge.label, 4000, `${path}.label`), style: color(edge.style, `${path}.style`) };
+    return { id: id(edge.id, `${path}.id`), source, target, sourceHandle: choice(edge.sourceHandle, HANDLES, `${path}.sourceHandle`), targetHandle: choice(edge.targetHandle, HANDLES, `${path}.targetHandle`), label: string(edge.label, 4000, `${path}.label`), style: color(edge.style, `${path}.style`), ...(waypoints === undefined ? {} : { waypoints }) };
   });
   const rawDrawings = doc.drawings === undefined ? [] : doc.drawings;
   if (!Array.isArray(rawDrawings) || rawDrawings.length > 1000) fail('diagram.drawings must be an array with at most 1,000 strokes.');
@@ -183,8 +195,9 @@ export function duplicateSelection(doc: Diagram, nodeIds: string[], edgeIds?: st
   const selected = new Set(nodeIds);
   const selectedEdges = edgeIds === undefined ? undefined : new Set(edgeIds);
   const ids = new Map(copy.nodes.filter((node) => selected.has(node.id)).map((node) => [node.id, freshId()]));
-  const nodes = copy.nodes.filter((node) => ids.has(node.id)).map((node) => ({ ...node, id: ids.get(node.id)!, position: { x: node.position.x + 32, y: node.position.y + 32 } }));
-  const edges = copy.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target) && (selectedEdges === undefined || selectedEdges.has(edge.id))).map((edge) => ({ ...edge, id: freshId(), source: ids.get(edge.source)!, target: ids.get(edge.target)! }));
+  const groups = new Map(copy.nodes.filter(node => selected.has(node.id) && node.groupId).map(node => [node.groupId!, freshId()]));
+  const nodes = copy.nodes.filter((node) => ids.has(node.id)).map((node) => ({ ...node, id: ids.get(node.id)!, ...(node.groupId ? { groupId: groups.get(node.groupId) } : {}), position: { x: node.position.x + 32, y: node.position.y + 32 } }));
+  const edges = copy.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target) && (selectedEdges === undefined || selectedEdges.has(edge.id))).map((edge) => ({ ...edge, id: freshId(), source: ids.get(edge.source)!, target: ids.get(edge.target)!, ...(edge.waypoints ? { waypoints: edge.waypoints.map(point => ({ x: point.x + 32, y: point.y + 32 })) } : {}) }));
   return validateDiagram({ ...copy, nodes: [...copy.nodes, ...nodes], edges: [...copy.edges, ...edges] });
 }
 export function exampleDiagram(): Diagram {
