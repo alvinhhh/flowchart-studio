@@ -45,15 +45,16 @@ async function canvasTarget(page: Page) {
   return { point: { x: Math.round(bounds.x + bounds.width * 0.62), y: Math.round(bounds.y + bounds.height * 0.57) }, origin: { x: bounds.x, y: bounds.y } };
 }
 
-/** Uses the browser's native drag lifecycle, rather than dispatched drag events. */
+/** Uses real pointer input rather than dispatched drag events. */
 async function pointerDrag(page: Page, source: Locator, target: Point, cancel = false) {
+  await source.scrollIntoViewIfNeeded();
   const bounds = (await source.boundingBox())!;
   const start = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(start.x + 14, start.y + 4, { steps: 4 });
   await page.mouse.move(target.x, target.y, { steps: 20 });
-  // Both engines need a further move after drag initiation to deliver dragover.
+  // Exercise pointer updates after the drag threshold is crossed.
   await page.mouse.move(target.x + 1, target.y + 1);
   await page.mouse.move(target.x, target.y);
   if (cancel) await page.keyboard.press('Escape');
@@ -108,7 +109,7 @@ test('grid-free drops preserve cursor coordinates while click and keyboard addit
   await expect.poll(async () => (await documentByTitle(page, title))?.nodes.map(item => item.type)).toEqual(['decision', 'process', 'note']);
 });
 
-test('dropping outside the canvas and canceling a native drag add no shapes', async ({ page }) => {
+test('dropping outside the canvas and canceling a palette drag add no shapes', async ({ page }) => {
   const title = 'Canceled palette drop';
   await prepare(page, title, true);
   const header = (await page.locator('.editor-header').boundingBox())!;

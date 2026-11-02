@@ -194,7 +194,8 @@ test('JSON download imports in a fresh browser context with labels, notes, conne
   const downloaded = JSON.parse(await readFile((await download.path())!, 'utf8'));
   expect(downloaded.nodes).toEqual(fixture.nodes);
   expect(downloaded.edges).toEqual(fixture.edges);
-  expect(downloaded.settings).toEqual(fixture.settings);
+  expect(downloaded.settings).toEqual({ ...fixture.settings, background: fixture.settings.gridVisible ? 'dots' : 'blank' });
+  expect(downloaded.drawings).toEqual([]);
   const context = await browser.newContext();
   try {
     const freshPage = await context.newPage();

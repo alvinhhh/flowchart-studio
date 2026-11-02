@@ -10,8 +10,8 @@ function shape(id: string, x: number, y: number): DiagramNode {
 function document(nodes: DiagramNode[]): Diagram {
   return {
     schemaVersion: 1, documentId: 'test-document', title: 'Test', createdAt: '2026-11-02T00:00:00.000Z',
-    updatedAt: '2026-11-02T00:00:00.000Z', revision: 0, nodes, edges: [],
-    viewport: { x: 0, y: 0, zoom: 1 }, settings: { snapToGrid: false, gridVisible: true },
+    updatedAt: '2026-11-02T00:00:00.000Z', revision: 0, nodes, edges: [], drawings: [],
+    viewport: { x: 0, y: 0, zoom: 1 }, settings: { snapToGrid: false, gridVisible: true, background: 'dots' },
   };
 }
 
@@ -49,6 +49,35 @@ describe('complete diagram export', () => {
     const bounds = exportBounds(doc);
     expect(bounds.y).toBeLessThan(-350);
     expect(bounds.y + bounds.height).toBeGreaterThan(250);
+  });
+
+  it('includes pressure-sensitive ink beyond the shapes and draws it below connectors', () => {
+    const doc = document([shape('start', 0, 0), shape('end', 300, 0)]);
+    doc.drawings = [{ id: 'ink', color: 'neutral', width: 10, points: [{ x: -800, y: -400, pressure: 1 }, { x: 900, y: 600, pressure: 0.2 }] }];
+    doc.edges = [{ id: 'edge', source: 'start', target: 'end', sourceHandle: 'right', targetHandle: 'left', label: '', style: { color: 'blue' } }];
+    const bounds = exportBounds(doc);
+    expect(bounds.x).toBeLessThanOrEqual(-858);
+    expect(bounds.y).toBeLessThanOrEqual(-458);
+    expect(bounds.x + bounds.width).toBeGreaterThanOrEqual(950);
+    const svg = diagramToSvg(doc);
+    expect(svg).toContain('data-drawing-id="ink"');
+    expect(svg).toContain('fill="#242424"');
+    expect(svg.indexOf('data-drawing-id=')).toBeLessThan(svg.indexOf('marker-end='));
+    expect(svg).not.toMatch(/NaN|Infinity/);
+  });
+
+  it('exports a drawing-only document and the selected background on white', () => {
+    const doc = document([]);
+    doc.drawings = [{ id: 'dot', color: 'rose', width: 8, points: [{ x: 150, y: -120, pressure: 0.5 }] }];
+    expect(exportBounds(doc)).toEqual({ x: 98, y: -172, width: 104, height: 104 });
+    for (const background of ['dots', 'graph', 'blank'] as const) {
+      doc.settings.background = background;
+      const svg = diagramToSvg(doc);
+      expect(svg).toContain('fill="#ffffff"');
+      expect(svg).toContain('data-drawing-id="dot"');
+      if (background === 'blank') expect(svg).not.toContain('<pattern');
+      else expect(svg).toContain(`fill="url(#background-${background})"`);
+    }
   });
 
   it('rejects invalid shape coordinates before building a raster image', () => {

@@ -1,5 +1,6 @@
 import type { Diagram, DiagramNode } from './diagram';
-import { colorValues, edgeRoute, handlePoint, labelWidth, nodePath, wrapLabel } from './geometry';
+import { drawingBounds, drawingPath } from './drawing';
+import { colorValues, edgeRoute, handlePoint, labelWidth, nodePath, nodeTextBox, wrapLabel } from './geometry';
 
 const FONT_SIZE = 14;
 const LINE_HEIGHT = 20;
@@ -16,7 +17,7 @@ function xml(value: string): string {
 }
 
 function nodeLines(node: DiagramNode): string[] {
-  return wrapLabel(node.label, node.type === 'decision' ? node.width * 0.55 : node.width - 32, FONT_SIZE);
+  return wrapLabel(node.label, nodeTextBox(node.type, node.width, node.height).width, FONT_SIZE);
 }
 
 function scene(diagram: Diagram) {
@@ -34,7 +35,13 @@ function scene(diagram: Diagram) {
     const route = edgeRoute(handlePoint(source, edge.sourceHandle), handlePoint(target, edge.targetHandle), edge.sourceHandle, edge.targetHandle);
     return [{ edge, route, lines: edge.label ? wrapLabel(edge.label, 220, FONT_SIZE) : [] }];
   });
-  return { nodes, edges };
+  const drawings = (diagram.drawings ?? []).filter(stroke => stroke.points.length > 0);
+  for (const stroke of drawings) {
+    if (!Number.isFinite(stroke.width) || stroke.width <= 0 || stroke.points.some(point => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
+      throw new Error('A drawing has invalid coordinates. Correct the drawing before exporting PNG.');
+    }
+  }
+  return { nodes, edges, drawings };
 }
 
 function boundsForScene(content: ReturnType<typeof scene>): ExportBounds {
@@ -48,12 +55,17 @@ function boundsForScene(content: ReturnType<typeof scene>): ExportBounds {
     right = Math.max(right, x + width);
     bottom = Math.max(bottom, y + height);
   }
+  for (const stroke of content.drawings) {
+    const bounds = drawingBounds(stroke);
+    include(bounds.x, bounds.y, bounds.width, bounds.height);
+  }
   for (const node of content.nodes) {
     include(node.position.x - 2, node.position.y - 2, node.width + 4, node.height + 4);
     const lines = nodeLines(node);
+    const textBox = nodeTextBox(node.type, node.width, node.height);
     const textWidth = Math.max(...lines.map(line => labelWidth(line, FONT_SIZE)), 0);
-    include(node.position.x + node.width / 2 - textWidth / 2 - 4,
-      node.position.y + node.height / 2 - lines.length * LINE_HEIGHT / 2,
+    include(node.position.x + textBox.x - textWidth / 2 - 4,
+      node.position.y + textBox.y - lines.length * LINE_HEIGHT / 2,
       textWidth + 8, lines.length * LINE_HEIGHT);
   }
   for (const { route, lines } of content.edges) {
@@ -68,7 +80,7 @@ function boundsForScene(content: ReturnType<typeof scene>): ExportBounds {
   return { x: left - PADDING, y: top - PADDING, width: right - left + PADDING * 2, height: bottom - top + PADDING * 2 };
 }
 
-/** Includes every shape, route, arrowhead, and label, regardless of viewport. */
+/** Includes every shape, drawing, route, arrowhead, and label, regardless of viewport. */
 export function exportBounds(diagram: Diagram): ExportBounds {
   return boundsForScene(scene(diagram));
 }
@@ -83,6 +95,12 @@ function renderSvg(diagram: Diagram, rasterSize?: { width: number; height: numbe
   const bounds = boundsForScene(content);
   const names = ['neutral', 'blue', 'amber', 'rose', 'violet'] as const;
   const markers = names.map(name => `<marker id="arrow-${name}" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse" viewBox="0 0 10 10"><path d="M 0 0 L 10 5 L 0 10 Z" fill="${colorValues(name).stroke}"/></marker>`).join('');
+  const drawings = content.drawings.map(stroke => `<path data-drawing-id="${xml(stroke.id)}" d="${drawingPath(stroke)}" fill="${stroke.color === 'neutral' ? '#242424' : colorValues(stroke.color).stroke}"/>`).join('');
+  const background = diagram.settings.background ?? (diagram.settings.gridVisible ? 'dots' : 'blank');
+  const backgroundPatterns = background === 'dots'
+    ? '<pattern id="background-dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="8" cy="8" r="1" fill="#c4c6ce"/></pattern>'
+    : background === 'graph' ? '<pattern id="background-minor" width="16" height="16" patternUnits="userSpaceOnUse"><path d="M 16 0 H 0 V 16" fill="none" stroke="#e2e4eb" stroke-width="0.6"/></pattern><pattern id="background-graph" width="80" height="80" patternUnits="userSpaceOnUse"><rect width="80" height="80" fill="url(#background-minor)"/><path d="M 80 0 H 0 V 80" fill="none" stroke="#c3c7d3" stroke-width="1"/></pattern>' : '';
+  const backgroundRect = background === 'blank' ? '' : `<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="url(#background-${background})"/>`;
   const edges = content.edges.map(({ edge, route }) => {
     const color = colorValues(edge.style.color);
     const marker = names.includes(edge.style.color) ? edge.style.color : 'neutral';
@@ -90,7 +108,8 @@ function renderSvg(diagram: Diagram, rasterSize?: { width: number; height: numbe
   }).join('');
   const nodes = content.nodes.map(node => {
     const color = colorValues(node.style.color);
-    return `<g transform="translate(${node.position.x} ${node.position.y})"><path d="${nodePath(node.type, node.width, node.height)}" fill="${color.fill}" stroke="${color.stroke}" stroke-width="1.75" stroke-linejoin="round"/>${textMarkup(nodeLines(node), node.width / 2, node.height / 2, color.text)}</g>`;
+    const textBox = nodeTextBox(node.type, node.width, node.height);
+    return `<g transform="translate(${node.position.x} ${node.position.y})"><path d="${nodePath(node.type, node.width, node.height)}" fill="${color.fill}" stroke="${color.stroke}" stroke-width="1.75" stroke-linejoin="round"/>${textMarkup(nodeLines(node), textBox.x, textBox.y, color.text)}</g>`;
   }).join('');
   const labels = content.edges.map(({ route, lines }) => {
     if (!lines.length) return '';
@@ -98,7 +117,7 @@ function renderSvg(diagram: Diagram, rasterSize?: { width: number; height: numbe
     const height = lines.length * LINE_HEIGHT + 10;
     return `<g><rect x="${route.labelX - width / 2}" y="${route.labelY - height / 2}" width="${width}" height="${height}" rx="6" fill="#ffffff"/>${textMarkup(lines, route.labelX, route.labelY, '#334155')}</g>`;
   }).join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${rasterSize?.width ?? bounds.width}" height="${rasterSize?.height ?? bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"><defs>${markers}</defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="#ffffff"/>${edges}${nodes}${labels}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${rasterSize?.width ?? bounds.width}" height="${rasterSize?.height ?? bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"><defs>${markers}${backgroundPatterns}</defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="#ffffff"/>${backgroundRect}${drawings}${edges}${nodes}${labels}</svg>`;
 }
 
 /** An internal, self-contained render source for PNG; contains no HTML. */

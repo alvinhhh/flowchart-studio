@@ -1,7 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import { copyDiagram, createNode, DiagramValidationError, duplicateSelection, exampleDiagram, MAX_IMPORT_BYTES, newDiagram, parseDiagram, serializeDiagram, validateDiagram } from './diagram';
+import { copyDiagram, createNode, DiagramValidationError, duplicateSelection, exampleDiagram, MAX_IMPORT_BYTES, newDiagram, NODE_TYPES, parseDiagram, serializeDiagram, validateDiagram } from './diagram';
 
 describe('portable diagrams', () => {
+  it('opens older files with no drawings or background setting', () => {
+    const value = JSON.parse(JSON.stringify(exampleDiagram()));
+    delete value.drawings;
+    delete value.settings.background;
+    expect(validateDiagram(value).drawings).toEqual([]);
+    expect(validateDiagram(value).settings.background).toBe('dots');
+    value.settings.gridVisible = false;
+    expect(validateDiagram(value).settings.background).toBe('blank');
+  });
+
+  it('round trips every shape, pressure strokes, and background with independent copies', () => {
+    const doc = newDiagram('Shapes and drawing');
+    doc.nodes = NODE_TYPES.map((type, index) => createNode(type, { x: index * 200, y: 0 }));
+    doc.drawings = [{ id: 'ink-1', width: 6, color: 'neutral', points: [{ x: -10, y: 25, pressure: .1 }, { x: 50, y: 40, pressure: 1 }] }];
+    doc.settings.background = 'graph';
+    const parsed = parseDiagram(serializeDiagram(doc));
+    expect(parsed).toEqual(doc);
+    const copied = copyDiagram(parsed);
+    expect(copied.drawings[0]).toEqual({ ...doc.drawings[0], id: copied.drawings[0].id });
+    expect(copied.drawings[0].id).not.toBe(doc.drawings[0].id);
+    copied.drawings[0].points[0].x = 20;
+    expect(doc.drawings[0].points[0].x).toBe(-10);
+  });
+
+  it('rejects invalid drawing data and conflicting IDs', () => {
+    const doc = exampleDiagram();
+    const stroke = { id: 'ink-1', width: 3, color: 'neutral', points: [{ x: 0, y: 0, pressure: .5 }] };
+    for (const invalid of [{ ...stroke, id: doc.nodes[0].id }, { ...stroke, width: 0 }, { ...stroke, points: [] }, { ...stroke, points: [{ x: NaN, y: 0, pressure: .5 }] }, { ...stroke, points: [{ x: 0, y: 0, pressure: 2 }] }, { ...stroke, secret: 'unknown' }]) {
+      expect(() => validateDiagram({ ...doc, drawings: [invalid] })).toThrow(DiagramValidationError);
+    }
+    expect(() => validateDiagram({ ...doc, drawings: Array(1001).fill(stroke) })).toThrow(/1,000/);
+    expect(() => validateDiagram({ ...doc, drawings: [{ ...stroke, points: Array(20001).fill(stroke.points[0]) }] })).toThrow(/20,000/);
+    expect(() => validateDiagram({ ...doc, settings: { ...doc.settings, background: 'photo' } })).toThrow(/background/);
+  });
+
   it('round trips text and portable content without changing the source', () => {
     const doc = exampleDiagram();
     doc.nodes[0].label = '<script>literal text</script>\n日本語';

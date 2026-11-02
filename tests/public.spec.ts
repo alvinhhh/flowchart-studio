@@ -130,7 +130,7 @@ test('a narrow editor has usable Shapes, closable Properties, and a keyboard-clo
   await expect(shapes).toHaveAttribute('aria-expanded', 'true');
   const palette = page.getByRole('complementary', { name: 'Shapes', exact: true });
   await expect(palette).toBeVisible();
-  await expect(palette.getByRole('button', { name: /^Add / })).toHaveCount(6);
+  await expect(palette.getByRole('button', { name: /^Add / })).toHaveCount(32);
   await palette.getByRole('button', { name: 'Add Process', exact: true }).click();
   const properties = page.getByRole('complementary', { name: 'Properties', exact: true });
   await expect(properties).toBeVisible();

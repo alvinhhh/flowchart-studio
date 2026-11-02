@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PRODUCT } from "@/lib/config";
 
-const description = "Make programming flowcharts with six shapes, labeled branches, and loops. Save locally in your browser and export JSON or PNG. No signup required.";
+const description = "Make programming flowcharts with 32 shapes, freehand drawing, labeled branches, and loops. Save locally in your browser and export JSON or PNG. No signup required.";
 
 export const metadata: Metadata = {
   title: { absolute: `Free programming flowchart maker | ${PRODUCT.name}` },
