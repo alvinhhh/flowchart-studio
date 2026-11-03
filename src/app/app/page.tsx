@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import Editor from "@/components/editor";
 import { PRODUCT } from "@/lib/config";
 
-const description = "Draw and edit programming flowcharts. Projects save locally in your browser, with JSON and PNG export.";
+const description = "Draw and edit programming flowcharts. Projects save locally in your browser, with JSON, PNG, SVG, and PDF export.";
 export const metadata: Metadata = {
   title: "Flowchart editor",
   description,

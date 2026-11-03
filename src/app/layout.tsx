@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     default: `Free programming flowchart maker | ${PRODUCT.name}`,
     template: `%s | ${PRODUCT.name}`,
   },
-  description: "Draw programming flowcharts with branches and loops. Save in your browser and export JSON or PNG. Free, with no account required.",
+  description: "Free programming flowchart maker with 32 shapes, branches, and loops. No account, ads, or analytics. Save locally and export JSON, PNG, SVG, or PDF.",
   applicationName: PRODUCT.name,
   openGraph: {
     type: "website",
