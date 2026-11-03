@@ -129,12 +129,38 @@ function exitPoint(point: Point, node: DiagramNode, handle: HandleId): Point {
   return { x: direction.x ? (direction.x > 0 ? Math.max(point.x + 28, box.right) : Math.min(point.x - 28, box.left)) : point.x, y: direction.y ? (direction.y > 0 ? Math.max(point.y + 28, box.bottom) : Math.min(point.y - 28, box.top)) : point.y };
 }
 
-/** Routes avoid node bounds with 16px clearance. Explicit bends may enter a shape intentionally. */
+function endpointCorridor(start: Point, end: Point, source: DiagramNode, target: DiagramNode, sourceHandle: HandleId, targetHandle: HandleId) {
+  const a = exitPoint(start, source, sourceHandle), b = exitPoint(end, target, targetHandle);
+  const sourceBox = bounds(source), targetBox = bounds(target);
+  const sd = directions[sourceHandle], td = directions[targetHandle];
+  if (sd.x !== -td.x || sd.y !== -td.y) return { a, b, sourceBox, targetBox };
+  const axis = sd.x ? 'x' : 'y', forward = sd[axis], positive = forward > 0;
+  const sourceSide = sd.x ? (positive ? 'right' : 'left') : (positive ? 'bottom' : 'top');
+  const targetSide = sd.x ? (positive ? 'left' : 'right') : (positive ? 'top' : 'bottom');
+  const sourceEdge = sourceBox[sourceSide] - forward * CLEARANCE, targetEdge = targetBox[targetSide] + forward * CLEARANCE;
+  const from = positive ? Math.max(sourceEdge, start[axis]) : Math.min(sourceEdge, start[axis]);
+  const to = positive ? Math.min(targetEdge, end[axis]) : Math.max(targetEdge, end[axis]);
+  if ((to - from) * forward <= 0) return { a, b, sourceBox, targetBox };
+  // Facing ports share a narrow gap instead of extending past one another.
+  const middle = (from + to) / 2;
+  a[axis] = positive ? Math.min(a[axis], middle) : Math.max(a[axis], middle);
+  b[axis] = positive ? Math.max(b[axis], middle) : Math.min(b[axis], middle);
+  sourceBox[sourceSide] = positive ? Math.min(sourceBox[sourceSide], middle) : Math.max(sourceBox[sourceSide], middle);
+  targetBox[targetSide] = positive ? Math.max(targetBox[targetSide], middle) : Math.min(targetBox[targetSide], middle);
+  return { a, b, sourceBox, targetBox };
+}
+
+/** Routes use 16px clearance where space permits. Explicit bends may enter a shape intentionally. */
 export function routeDiagramEdge(edge: DiagramEdge, source: DiagramNode, target: DiagramNode, nodes: DiagramNode[], endpoints?: { source: Point; target: Point }): DiagramRoute {
   const start = endpoints?.source ?? handlePoint(source, edge.sourceHandle), end = endpoints?.target ?? handlePoint(target, edge.targetHandle);
-  const a = exitPoint(start, source, edge.sourceHandle), b = exitPoint(end, target, edge.targetHandle);
-  const boxes = nodes.map(bounds);
+  const { a, b, sourceBox, targetBox } = endpointCorridor(start, end, source, target, edge.sourceHandle, edge.targetHandle);
+  const boxes = nodes.map(node => node.id === source.id ? sourceBox : node.id === target.id ? targetBox : bounds(node));
   const waypoints = edge.waypoints ?? [];
+  const sd = directions[edge.sourceHandle], td = directions[edge.targetHandle];
+  if (!waypoints.length && sd.x === -td.x && sd.y === -td.y
+    && (sd.x ? start.y === end.y : start.x === end.x)
+    && (end.x - start.x) * sd.x + (end.y - start.y) * sd.y > 0
+    && clear(start, end, boxes.filter((_, i) => nodes[i].id !== source.id && nodes[i].id !== target.id))) return finish([start, end]);
   const stops = [a, ...waypoints, b];
   const points = [start, a];
   for (let i = 1; i < stops.length; i++) {

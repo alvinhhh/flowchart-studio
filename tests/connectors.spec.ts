@@ -102,3 +102,45 @@ test('bend keyboard movement and removal are undoable', async ({ page }) => {
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(async () => (await saved(page))?.edges[0].waypoints).toEqual([{ x: 251, y: 30 }]);
 });
+
+test('close facing connections stay compact in the canvas and SVG export', async ({ page }, testInfo) => {
+  const diagram = fixture();
+  const base = diagram.nodes[0];
+  diagram.nodes = [
+    { ...base, id: 'aligned-start', label: 'Start', position: { x: 0, y: 100 } },
+    { ...base, id: 'aligned-end', label: 'Next step', position: { x: 170, y: 100 } },
+    { ...base, id: 'offset-start', label: 'Review', position: { x: 0, y: 300 } },
+    { ...base, id: 'offset-end', label: 'Continue', position: { x: 170, y: 345 } },
+  ];
+  diagram.edges = [
+    { ...diagram.edges[0], id: 'aligned', source: 'aligned-start', target: 'aligned-end' },
+    { ...diagram.edges[0], id: 'offset', source: 'offset-start', target: 'offset-end' },
+  ];
+  await page.goto('/app');
+  await page.locator('input[type="file"]').setInputFiles({ name: 'close-connections.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(diagram)) });
+  await expect.poll(async () => (await saved(page))?.edges.length).toBe(2);
+  const paths = page.locator('.react-flow__edge-path');
+  await expect(paths).toHaveCount(2);
+  const handleBounds = (await page.locator('.react-flow__handle[data-handleid="right"]').first().boundingBox())!;
+  const handleRadius = handleBounds.width / (2 * diagram.viewport.zoom);
+  await expect(paths.nth(0)).toHaveAttribute('d', `M ${140 + handleRadius} 140 L ${170 - handleRadius} 140`);
+  await expect(paths.nth(1)).toHaveAttribute('d', `M ${140 + handleRadius} 340 L 155 340 L 155 385 L ${170 - handleRadius} 385`);
+  const displayed = await paths.evaluateAll(elements => elements.map(element => element.getAttribute('d')));
+  const pending = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export SVG', exact: true }).click();
+  const download = await pending;
+  const svg = await readFile((await download.path())!, 'utf8');
+  const exported = await page.evaluate(source => {
+    const document = new DOMParser().parseFromString(source, 'image/svg+xml');
+    return [...document.querySelectorAll('path[marker-end]')].map(element => element.getAttribute('d'));
+  }, svg);
+  const coordinates = (path: string | null) => (path?.match(/-?(?:\d*\.)?\d+(?:e[+-]?\d+)?/gi) ?? []).map(Number);
+  // Canvas connectors meet the visible handle edge; SVG connectors meet the shape contour.
+  const normalized = displayed.map(path => {
+    const points = coordinates(path);
+    points[0] -= handleRadius; points[points.length - 2] += handleRadius;
+    return points;
+  });
+  expect(exported.map(coordinates)).toEqual(normalized);
+  if (testInfo.project.name === 'chromium') await page.screenshot({ path: 'outputs/close-connections.png' });
+});

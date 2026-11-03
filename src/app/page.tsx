@@ -101,7 +101,6 @@ export default function Home() {
       <main id="main-content">
         <section className="public-hero" aria-labelledby="home-title">
           <div className="hero-copy">
-            <p className="public-eyebrow">PROGRAMMING FLOWCHARTS</p>
             <h1 id="home-title">Free programming<br className="desktop-break" /> flowchart maker</h1>
             <p className="public-lead">Draw algorithms, decisions, and loops with 32 shapes. Free, with no account, ads, or analytics. Save locally in your browser, or share an encrypted snapshot with a link that expires in 24 hours.</p>
             <div className="hero-actions"><Link className="public-primary" href="/app" prefetch={false}>Open editor <span aria-hidden="true">→</span></Link><Link className="public-example-link" href="/app?example=1" prefetch={false}>Open example</Link></div>

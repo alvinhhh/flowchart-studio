@@ -25,6 +25,7 @@ type Gesture = {
   erased: Set<string>;
   last: DrawingPoint;
   spacing: number;
+  stopFallback?: () => void;
 };
 const ink = (color: ColorName) => color === 'neutral' ? '#242424' : colorValues(color).stroke;
 const MAX_POINTS = 20_000;
@@ -45,6 +46,7 @@ export default function DrawingOverlay({ strokes, mode, color, width, disabled, 
       const active = gesture.current;
       if (!active) return;
       gesture.current = null;
+      active.stopFallback?.();
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       frame.current = null;
       setPreview(null); setErased(new Set());
@@ -140,28 +142,72 @@ export default function DrawingOverlay({ strokes, mode, color, width, disabled, 
     if (!gesture.current || event.pointerId !== gesture.current.pointerId) return;
     if (event.buttons & 2) { cancel.current(); return; }
     event.preventDefault(); event.stopPropagation();
+    if (gesture.current.stopFallback && event.buttons === 0) { complete(gesture.current, gesture.current.last); return; }
     accumulate(event.nativeEvent);
   }
-  function finish(event: ReactPointerEvent<HTMLDivElement>) {
-    const active = gesture.current;
-    if (!active || active.pointerId !== event.pointerId) return;
-    event.preventDefault(); event.stopPropagation();
-    // Pointer-up pressure is commonly zero; retain the final contact pressure.
-    const endpoint = sample(event.nativeEvent);
-    endpoint.pressure = active.last.pressure;
+  function complete(active: Gesture, endpoint: DrawingPoint) {
+    if (gesture.current !== active) return;
     consume(endpoint);
     if (active.mode === 'draw' && Math.hypot(active.stroke.points.at(-1)!.x - endpoint.x, active.stroke.points.at(-1)!.y - endpoint.y) > 0.001) {
       if (active.stroke.points.length < MAX_POINTS) active.stroke.points.push(endpoint);
       else active.stroke.points[active.stroke.points.length - 1] = endpoint;
     }
     gesture.current = null;
+    active.stopFallback?.();
     if (frame.current !== null) cancelAnimationFrame(frame.current);
     frame.current = null;
     setPreview(null); setErased(new Set());
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (active.element.hasPointerCapture(active.pointerId)) active.element.releasePointerCapture(active.pointerId);
     if (active.mode === 'draw') handlers.current.onAdd(active.stroke);
     else if (active.erased.size) handlers.current.onErase([...active.erased]);
     handlers.current.onDrawingChange?.(false);
+  }
+  function finishPointer(event: PointerEvent) {
+    const active = gesture.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    // Pointer-up pressure is commonly zero; retain the final contact pressure.
+    const endpoint = sample(event);
+    endpoint.pressure = active.last.pressure;
+    complete(active, endpoint);
+  }
+  function finish(event: ReactPointerEvent<HTMLDivElement>) {
+    if (gesture.current?.pointerId !== event.pointerId) return;
+    event.preventDefault(); event.stopPropagation();
+    finishPointer(event.nativeEvent);
+  }
+  function lostCapture(event: ReactPointerEvent<HTMLDivElement>) {
+    const active = gesture.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    if (event.buttons === 0) {
+      // Some browsers report capture loss before pointer-up, or omit pointer-up.
+      // Capture events can have hover coordinates; preserve the last contact.
+      complete(active, active.last);
+      return;
+    }
+    if (active.stopFallback) return;
+    const moveOutside = (next: PointerEvent) => {
+      if (gesture.current !== active || next.pointerId !== active.pointerId) return;
+      if (next.buttons & 2) { cancel.current(); return; }
+      if (next.buttons === 0) { complete(active, active.last); return; }
+      next.preventDefault();
+      accumulate(next);
+    };
+    const releaseOutside = (next: PointerEvent) => {
+      if (gesture.current !== active || next.pointerId !== active.pointerId) return;
+      next.preventDefault();
+      finishPointer(next);
+    };
+    const cancelOutside = (next: PointerEvent) => {
+      if (next.pointerId === active.pointerId) cancel.current();
+    };
+    active.stopFallback = () => {
+      window.removeEventListener('pointermove', moveOutside);
+      window.removeEventListener('pointerup', releaseOutside);
+      window.removeEventListener('pointercancel', cancelOutside);
+    };
+    window.addEventListener('pointermove', moveOutside);
+    window.addEventListener('pointerup', releaseOutside);
+    window.addEventListener('pointercancel', cancelOutside);
   }
   const active = !disabled && (mode === 'draw' || mode === 'erase');
   return <>
@@ -174,6 +220,6 @@ export default function DrawingOverlay({ strokes, mode, color, width, disabled, 
     {active && <div className="drawing-input" aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 4, touchAction: 'none', cursor: mode === 'draw' ? 'crosshair' : 'cell' }}
       onPointerDown={start} onPointerMove={move} onPointerUp={finish}
       onPointerCancel={event => { if (event.pointerId === gesture.current?.pointerId) cancel.current(); }}
-      onLostPointerCapture={event => { if (event.pointerId === gesture.current?.pointerId) cancel.current(); }} />}
+      onLostPointerCapture={lostCapture} />}
   </>;
 }

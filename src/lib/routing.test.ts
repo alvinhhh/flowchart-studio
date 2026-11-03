@@ -19,6 +19,68 @@ function crosses(a: Point, b: Point, box: DiagramNode, clearance = 16) {
 const orthogonal = (points: Point[]) => points.slice(1).every((point, i) => point.x === points[i].x || point.y === points[i].y);
 
 describe('diagram routing', () => {
+  it.each([1, 15, 30, 40, 55, 56, 80])('keeps facing ports straight across a %ipx gap', gap => {
+    const a = node('a', 0, 0);
+    for (const [b, sourceHandle, targetHandle] of [
+      [node('b', 100 + gap, 0), 'right', 'left'],
+      [node('b', -100 - gap, 0), 'left', 'right'],
+      [node('b', 0, 60 + gap), 'bottom', 'top'],
+      [node('b', 0, -60 - gap), 'top', 'bottom'],
+    ] as const) {
+      const start = handlePoint(a, sourceHandle), end = handlePoint(b, targetHandle);
+      const route = routeDiagramEdge(edge(a, b, sourceHandle, targetHandle), a, b, [a, b]);
+      expect(route.points).toEqual([start, end]);
+      expect(route.labelX).toBe((start.x + end.x) / 2);
+      expect(route.labelY).toBe((start.y + end.y) / 2);
+    }
+  });
+
+  it.each([15, 30, 50])('uses the available corridor for offset facing ports with a %ipx gap', gap => {
+    for (const [a, b, sourceHandle, targetHandle] of [
+      [node('a', 0, 0), node('b', 100 + gap, 45), 'right', 'left'],
+      [node('a', 100 + gap, 45), node('b', 0, 0), 'left', 'right'],
+      [node('a', 0, 0), node('b', 45, 60 + gap), 'bottom', 'top'],
+      [node('a', 45, 60 + gap), node('b', 0, 0), 'top', 'bottom'],
+    ] as const) {
+      const route = routeDiagramEdge(edge(a, b, sourceHandle, targetHandle), a, b, [a, b]);
+      const start = handlePoint(a, sourceHandle), end = handlePoint(b, targetHandle);
+      expect(route.points[0]).toEqual(start); expect(route.points.at(-1)).toEqual(end);
+      expect(orthogonal(route.points)).toBe(true);
+      const length = route.points.slice(1).reduce((sum, point, i) => sum + Math.abs(point.x - route.points[i].x) + Math.abs(point.y - route.points[i].y), 0);
+      expect(length).toBe(Math.abs(end.x - start.x) + Math.abs(end.y - start.y));
+      for (const shape of [a, b]) expect(route.points.slice(1).some((point, i) => crosses(route.points[i], point, shape, 0))).toBe(false);
+    }
+  });
+
+  it('connects close sloped contour ports without a detour, including touching bounds', () => {
+    const a = { ...node('a', 0, 0, 180, 80), type: 'manual_operation' as const };
+    for (const gap of [0, 30]) {
+      const b = { ...node('b', 180 + gap, 0, 180, 80), type: 'preparation' as const };
+      const start = handlePoint(a, 'right'), end = handlePoint(b, 'left');
+      expect(routeDiagramEdge(edge(a, b), a, b, [a, b]).points).toEqual([start, end]);
+    }
+  });
+
+  it('keeps clearance from a third shape that blocks a narrow offset corridor', () => {
+    const a = node('a', 0, 0), b = node('b', 130, 220), obstacle = node('obstacle', 100, 100, 30, 60);
+    const route = routeDiagramEdge(edge(a, b), a, b, [a, b, obstacle]);
+    expect(orthogonal(route.points)).toBe(true);
+    expect(route.points.slice(1).some((point, i) => crosses(route.points[i], point, obstacle))).toBe(false);
+    expect(route.points[1].x).toBeGreaterThan(route.points[0].x);
+    expect(route.points.at(-2)!.x).toBeLessThan(route.points.at(-1)!.x);
+  });
+
+  it('preserves explicit bends when the endpoint ports are close and aligned', () => {
+    const a = node('a', 0, 0), b = node('b', 130, 0), bends = [{ x: 115, y: -100 }, { x: 115, y: -60 }];
+    const route = routeDiagramEdge(edge(a, b, 'right', 'left', bends), a, b, [a, b]);
+    expect(orthogonal(route.points)).toBe(true);
+    const indices = bends.map(bend => route.points.findIndex(point => point.x === bend.x && point.y === bend.y));
+    expect(indices[0]).toBeGreaterThan(0);
+    expect(indices[1]).toBeGreaterThan(indices[0]);
+    expect(route.points[1].x).toBeGreaterThan(route.points[0].x);
+    expect(route.points.at(-2)!.x).toBeLessThan(route.points.at(-1)!.x);
+  });
+
   it('routes around an intervening shape with clearance', () => {
     const a = node('a', 0, 0), b = node('b', 600, 0), obstacle = node('obstacle', 240, -70, 120, 200);
     const route = routeDiagramEdge(edge(a, b), a, b, [a, b, obstacle]);
