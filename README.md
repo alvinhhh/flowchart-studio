@@ -1,115 +1,64 @@
 # Flowchart Studio
 
-A free, local browser editor for programming flowcharts. Draw branches and loops, save projects on this device, and export editable JSON, PNG, SVG, or PDF. Optional share links publish an encrypted, read-only snapshot for 24 hours. There are no accounts, payments, ads, or analytics.
+A free flowchart editor that runs in your browser. No account, ads, or analytics.
+
+[Open Flowchart Studio](https://flowchart.lol/app) · [Source on GitHub](https://github.com/alvinhhh/flowchart-studio)
+
+## Features
+
+- 32 flowchart shapes, editable labels, colors, and notes.
+- Connections with labels, automatic routing, and editable bend points.
+- Selection, resizing, groups, locks, alignment, and distribution.
+- Automatic arrangement, grid snapping, pan, zoom, and undo/redo.
+- Pen, mouse, and touch drawing, with an eraser and background options.
+- JSON, SVG, high-resolution lossless PNG, and PDF export of the whole diagram.
+- Read-only share links that expire after 24 hours.
+
+## Files and storage
+
+Projects use IndexedDB in the current browser profile and site origin. Clearing site data, browser eviction, or device failure can remove them. Export **JSON** backups; JSON preserves editable shapes, connections, notes, drawings, and settings. The loaded editor can work offline, but reopening it offline is not guaranteed.
+
+**SVG** preserves vector geometry. **PNG** exports at 4× resolution, up to 64 megapixels or 16,384 pixels on either side. Large exports use a lower scale within those limits; diagrams too large for a readable PNG should use SVG or PDF. **PDF** uses a single page sized to the diagram, with vector shapes and supported text. Unsupported scripts and emoji use lossless label images. Large PDFs scale to the format's page limit. Notes remain in JSON and shared snapshots; they are not drawn in image or PDF exports.
+
+JSON imports accept up to 10 MiB, 5,000 shapes, 10,000 connections, 1,000 drawing strokes, and 200,000 drawing points. Direct self-connections are unsupported; loops through multiple shapes work.
+
+## Sharing and privacy
+
+Editing and saving do not upload diagrams. **Share → Create link** encrypts a snapshot in the browser and uploads the ciphertext. The decryption key stays in the link's URL fragment. Anyone with the complete link can read the snapshot, including notes, and retain a copy after expiry.
+
+Shared snapshots have a 512 KiB plaintext limit and expire after 24 hours. Cloudflare hosts the site and sharing storage; ordinary hosting request logs may still exist. See the [privacy page](https://flowchart.lol/privacy).
 
 ## Run locally
 
-Use Node.js 22 LTS (22.13 or newer) or Node.js 24 LTS, and npm.
+Use Node.js 22 LTS (22.13 or newer) or 24 LTS, and npm.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The public page is `/`; the editor is `/app`; `/app?example=1` opens an editable example.
+Open [localhost:3000/app](http://localhost:3000/app). Add `?example=1` to open an editable example.
 
 ```sh
 npm run typecheck
 npm run lint
 npm test
+npx playwright install chromium webkit
 npm run test:e2e
 npm run build
 npm start
 ```
 
-Browser tests require Playwright’s Chromium and WebKit browsers (`npx playwright install chromium webkit`). Tests run against a local server on port 3000; a running production preview is reused.
+## Deploy
 
-## Implemented
-
-- Immediate guest canvas; click or drag any of the 32 searchable, categorized sidebar shapes onto the canvas with a shape-only placement preview; multiline labels and notes; five color choices.
-- Drag empty canvas to pan; use Select or Shift-drag for box selection, and Space for temporary panning from any tool. Pan, zoom, fit, grid snapping and edge/center alignment guides; multi-selection; duplicate/delete; directed labeled connections, merges and multi-node loops. Reconnect by dragging an endpoint or changing its node/handle in Properties.
-- Corner resizing on a single selected shape, with label-fit minimums and a 2,000-pixel maximum per dimension. Connections follow live; each completed resize is one undo step. Escape cancels an unfinished resize.
-- Copy/cut/paste within and between documents, preserving internal connections, groups and bends with fresh IDs. System clipboard access falls back to the current editor when unavailable.
-- Groups move and align as units. Locking a member protects the whole group from editing and layout movement. Align to six edges/centers or distribute three or more units with equal horizontal/vertical gaps.
-- Undo/redo for completed edits and movement; Command shortcuts on Mac and Control shortcuts elsewhere for select all, duplicate and undo/redo, plus copy/cut/paste and group/ungroup, with text-field focus respected. Command/Control-click adds shapes to a selection.
-- Alignment snaps nearby edges and centers without changing group offsets. Toggle **Align shapes** to disable it, or hold Option/Alt to bypass both alignment and grid snapping.
-- Select a connection to insert or drag bend points; double-click a bend to remove it, or reset the route. Keyboard arrow keys move a focused bend. Automatic orthogonal routing avoids other shapes when space permits.
-- **Auto arrange** positions the whole flowchart and adjusts connection sides. It runs locally and is undoable in one step. It preserves the graph, labels, notes, dimensions, appearance and freehand strokes. Groups keep their internal positions and bends, and locked groups stay fixed. Editable external routes are reset to automatic routes. The main forward path stays straight where possible, side branches use separate handles, and feedback edges favor outside routes.
-- **Draw** supports mouse, touch, and pen Pointer Events with coalesced samples and pressure-sensitive width. **Eraser** removes whole strokes. Each gesture is one undo step; canceled gestures are discarded. Pen input takes priority over simultaneous touch. Brush width and color are adjustable.
-- **Background** selects Dot grid, Graph paper, or Blank. The choice and freehand drawings persist in JSON and appear in image and PDF exports.
-- New, rename, duplicate, delete-confirmation and a device-local document list. Autosave restores the last document, checks revisions across tabs, and preserves work on storage failure.
-- Versioned editable JSON import/export, vector SVG, full-diagram PNG and one-page PDF export sized to the diagram. Imported diagrams get a new document identity while preserving graph IDs and content.
-- Blank canvas and an editable order-processing logic example with Yes/No branches, a merge at review, and a correction loop.
-- Encrypted 24-hour share links with a read-only viewer, pan/zoom, JSON download, and explicit Save a copy. Editing and saving do not upload diagrams.
-- Public homepage, privacy explanation, and guides to flowchart symbols and drawing programming flowcharts, with metadata, linked structured data, a sitemap and crawler rules. No editor bundle prefetch from the homepage.
-
-## Structure
-
-- Next.js App Router and TypeScript, with a server-rendered homepage and privacy page.
-- The interactive editor is a separate client entry at `src/components/editor.tsx`. Homepage editor links disable prefetching so the editor is not loaded on the landing page.
-- Diagram data is separate from the rendered canvas. The model validates imports and supports 32 node types with shared shape outlines, text regions, and connection anchors. Legacy JSON files without drawings or a background choice still open.
-- Browser persistence uses IndexedDB and revision checks in the write transaction to detect a conflicting update from another tab. Save failures and conflicts are surfaced in the editor.
-- Automatic arrangement uses the local ELK engine plus flowchart constraints. Its chunk loads on first use; reconnect before first use if it has not loaded yet. Layout never uploads a diagram. The [ELK license and source notice](public/licenses/elkjs.txt) is included.
-- SVG export uses shared shape and connection geometry. PNG rasterizes that scene. PDF preserves vector paths and embeds Noto Sans for supported text, using the diagram’s natural size instead of shrinking it onto A4. Unsupported scripts and emoji use transparent, lossless label images rendered at up to eight times their canvas size. Conversion stays in the browser; the PDF libraries and font are loaded from this site when needed. There is no screenshot or export service.
-
-## Local data and technical limits
-
-Projects belong to the current origin and browser profile. Clearing site data, private browsing limits, browser eviction, or device failure can remove them. Export JSON backups. The loaded editor can work without a connection, but there is no service worker or guaranteed offline reopening.
-
-JSON import accepts files up to 10 MiB, with at most 5,000 nodes, 10,000 edges, 1,000 drawing strokes and 200,000 drawing points per diagram. Individual strokes contain up to 20,000 points; longer live gestures are resampled. These are defensive technical caps, not paid tiers. Direct self-connections are rejected; loops through multiple nodes are supported. Automatic arrangement uses deterministic layout heuristics; it does not guarantee a globally optimal arrangement. PNG export limits output to 16 million pixels and 8,192 pixels per dimension, downscaling when necessary. Extremely large extents that would make text unreadable fail clearly; JSON remains available. Connections support up to 64 manual bend points. Routing is orthogonal with 16-pixel shape clearance; enclosed endpoints and searches exceeding 180,000 grid points use a deterministic fallback that can cross shapes. PDF uses 72 points per 96 canvas pixels, with a minimum page dimension of 72 points. Diagrams exceeding the PDF page limit of 14,400 points are scaled uniformly. Printing a large diagram onto a small sheet can still make text too small; use poster/tiled printing when available. Unsupported-script label images are bounded to 8,192 pixels per dimension and eight million pixels each; oversized labels fail clearly instead of disappearing. Undo retains up to 100 completed operations. Labels commit when their field loses focus; notes are JSON metadata and are not drawn in image or PDF exports.
-
-The [privacy page](http://localhost:3000/privacy) describes local storage, import/export behavior, and ordinary website host request logs.
-
-## Hosting and configuration
-
-The production target is `https://flowchart.lol` on Cloudflare Pages. Run `npm run build:pages` with Node.js 22 to create the static `out/` directory. This command defaults `NEXT_PUBLIC_SITE_URL` to `https://flowchart.lol`; an explicitly set origin overrides it. Cloudflare Pages uses build command `npm run build:pages`, build output directory `out`, and Node.js 22 (also recorded in `.node-version`). The editor is static. Only `/api/shares*` invokes the generated Pages advanced-mode `_worker.js`; `_routes.json` keeps static requests outside the Function. Bind the `SHARES` variable to a dedicated Cloudflare KV namespace before deploying. The build uses the existing TypeScript dependency to emit the standalone worker. The Pages project is `flowchart-lol`; direct uploads publish only the contents of `out/`. The source repository remains on GitHub, but it is not connected to automatic Cloudflare builds. For an update, build and test the source, then upload the new `out/` contents as a production deployment in that Pages project. The generated `out/404.html` preserves real missing-page responses. Static assets include cache headers and the editor remains `noindex`.
-
-For a normal local Node.js preview, `npm run build` and `npm start` remain available. Do a normal build again after a Pages build before using `npm start`. Local editing needs no database, account provider, billing provider, or vendor SDK. Link sharing requires the Pages worker and KV binding; it is unavailable under plain `next dev` or `next start`. No paid infrastructure is required within the Workers and KV free quotas. Local operation requires no service subscription. Cloudflare static asset requests are free and unlimited under the current Pages plan; build, file-count, and file-size limits still apply. Account access, DNS activation, and live HTTPS verification are separate from building the files. Search Console and Bing ownership verification require access to those services; sitemap submission and indexation must be verified separately.
-
-The Pages build uses `https://flowchart.lol`. Set `NEXT_PUBLIC_SITE_URL` explicitly to build for another origin. It must be an absolute HTTP or HTTPS origin, with no path, credentials, query, or fragment. The local default is `http://localhost:3000`; it is not a production domain.
-
-Product name, canonical origin, and future cloud pricing are centralized in `src/lib/config.ts`. The future cloud prices are US$3/month or US$30/year (equivalent to US$2.50/month, billed annually; US$6 less than twelve monthly payments), and `available` is `false`. There is no checkout or subscription implementation in Phase 1.
-
-Metadata includes canonical URLs, Open Graph and Twitter metadata, an SVG icon, a generated social image, `robots.txt`, and a sitemap containing `/`, `/privacy`, `/guides/how-to-draw-a-flowchart`, and `/guides/flowchart-symbols`. `/app` is marked `noindex` but remains crawlable so crawlers can read the directive. The homepage links `WebSite`, `WebApplication`, and creator `Person` data. Guides include visible author credit, original examples, accessible diagrams, `Article` and `BreadcrumbList` data. There are no invented ratings or reviews. No ads, analytics, or tracking scripts are added for search optimization.
-
-Standard search practices apply to AI search features; there is no special AI markup. The current wildcard robots rule allows public crawling, including OAI-SearchBot and GPTBot. Search crawling and model-training crawling can be configured independently if the site's policy changes. Indexing or ranking is not guaranteed.
-
-References: [Next.js metadata](https://nextjs.org/docs/app/getting-started/metadata-and-og-images), [Google noindex](https://developers.google.com/search/docs/crawling-indexing/block-indexing), [Google AI search features](https://developers.google.com/search/docs/appearance/ai-features), [software application structured data](https://developers.google.com/search/docs/appearance/structured-data/software-app), [OpenAI crawlers](https://developers.openai.com/api/docs/bots).
-
-## Temporary sharing
-
-Choose **Share → Create link** (inside **Actions** on mobile). The browser validates the document and encrypts its JSON with AES-256-GCM, using a new 32-byte key and 12-byte IV. Only the version, IV and ciphertext are uploaded. The complete link is `/share#<random-id>.<key>`; the key stays in the URL fragment and is never sent to the sharing API. Anyone with the complete link can decrypt the snapshot. The snapshot includes notes as well as visible diagram content.
-
-`POST /api/shares` requires a same-origin JSON request and returns a random 128-bit ID and server expiry. `GET /api/shares/:id` returns the encrypted snapshot until expiry. KV has a 24-hour TTL and the worker also checks the stored expiry on every read. API responses use `no-store`; `/share` is `noindex`, `nofollow` and `no-referrer`. No share is automatically saved to IndexedDB; **Save a copy** creates fresh document and element IDs. Recipients can retain copies after the link expires.
-
-The plaintext sharing limit is 512KiB; the worker bounds and validates encrypted requests. Free KV quotas currently include 1,000 writes/day, 100,000 reads/day and 1 GB storage, shared across the account. Sharing fails visibly if storage or request quotas are exhausted; local editing remains available. Newly created links may briefly be unavailable in another region because KV is eventually consistent. The viewer makes bounded retries and provides a manual retry.
-
-To test sharing locally after `npm run build:pages`:
+Production uses Cloudflare Pages direct uploads, with Node.js 22:
 
 ```sh
-npx wrangler pages dev out --ip 127.0.0.1 --port 3000 --kv SHARES
-npx playwright test tests/sharing.spec.ts
+npm run build:pages
 ```
 
-Production uploads must include `_worker.js` and `_routes.json` alongside the static assets. The production `SHARES` namespace binding is configured in Pages settings. Normal development and browser data remain separate from production sharing storage.
+In the Cloudflare Pages project, bind a KV namespace as `SHARES`. Upload the complete `out/` directory, including `_worker.js` and `_routes.json`. GitHub pushes do not deploy automatically. Sharing requires the Pages worker and KV; it is unavailable under plain local Next.js development or preview.
 
-## Roadmap
+## Third-party licenses
 
-Phase 2 requires a separate request after review: optional free sign-in with Supabase, explicit opt-in cloud copies with owner authorization and conflict recovery, and Stripe subscriptions at the configured prices. Billing test mode, webhook verification, quotas, operating costs, and a retention policy must be reviewed before live billing. Local editing, saving, imports, and exports remain free.
-
-Later editor work includes diagram search and scoped Mermaid support, additional templates and tested offline reopening. Alignment guides and one-click arrangement are already implemented. Real-time collaboration and AI generation are separate later decisions, with no integrations in this release.
-
-## Verification
-
-Verified on November 2, 2026 using macOS arm64, Node.js 22.23.4, Next.js 16.4.4, Chromium 156.0.8078.4 and Playwright WebKit 27.2. Browsers tested the local production build, without external API keys.
-
-- `npm run typecheck`, `npm run lint`, `npm test`, and the production build pass. Unit tests: 175 passed across serialization/validation, history, IndexedDB conflicts/failures, all 32 shape contours and text regions, alignment, automatic layout, drawing pressure geometry, grouping/locking, clipboard fragments, orthogonal routing, PDF structure and export bounds.
-- Browser tests: 110 unique cases across Chromium and WebKit, with affected checks repeated after final fixes. Coverage includes corner resizing, connector bend editing and cancellation, copy/cut/paste between documents, groups, locks, alignment/distribution, SVG/PDF downloads, saved guest editing, drag/drop and shape-only previews, alignment and modifier keys, literal Mac Command shortcuts, default-layout readability and undo, all 32 shapes, background persistence, freehand save/erase/undo/PNG, and scripted pressure input. Existing checks cover document switching, old and new JSON round trips, malformed imports, offscreen PNG content, cross-tab conflicts, failed/quota-limited storage, offline editing, and 200-node diagrams.
-- Public HTML works with JavaScript disabled; metadata, free-only structured data, robots and the public sitemap entries agree. Instrumented editing and JSON export made zero HTTP requests after loading. Both engines passed automated axe checks with no serious/critical WCAG A/AA violations in the public page, Documents dialog and selected-node editor. Mobile checks at 390×844 passed collapsible controls, no horizontal overflow, and Help keyboard-focus restoration. Automated checks do not establish complete accessibility conformance.
-
-
-Not verified: physical drawing tablets and their individual drivers, actual Safari application, older browser releases, slow/mobile hardware, offline reopening, public deployment, live crawler access, search indexing or ranking. Account sign-in and billing are not implemented.
-
-Cloudflare deployment validation: the static Pages build passes TypeScript and the editor/layout/export checks (40 browser cases across Chromium and WebKit). Public HTML and guide checks cover four sitemap routes, production canonical URLs, structured data, no-JavaScript content, mobile layout, and keyboard-accessible tables. Live DNS, TLS, and crawler access are verified separately at release.
-
-PDF export uses [jsPDF](https://github.com/parallax/jsPDF) and [svg2pdf.js](https://github.com/yWorks/svg2pdf.js), both MIT licensed. The bundled [Noto Sans Medium](https://github.com/notofonts/noto-fonts/tree/main/hinted/ttf/NotoSans) font uses the SIL Open Font License; its license is included at `public/licenses/noto-sans.txt`. The glyph coverage file is derived from this font’s Unicode character map.
+Bundled notices: [ELK](public/licenses/elkjs.txt), [jsPDF](public/licenses/jspdf.txt), [svg2pdf.js](public/licenses/svg2pdf.txt), and [Noto Sans](public/licenses/noto-sans.txt).
