@@ -24,3 +24,10 @@ export const PRODUCT = {
     available: false,
   },
 } as const;
+
+export const SOCIAL_IMAGE = {
+  url: "/opengraph-image?v=20261103",
+  width: 1200,
+  height: 630,
+  alt: "Flowchart Studio — free flowchart editor with a branching example diagram",
+} as const;

@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { PRODUCT } from "@/lib/config";
+import { PRODUCT, SOCIAL_IMAGE } from "@/lib/config";
 
 const description = `How ${PRODUCT.name} stores projects in your browser, handles optional 24-hour sharing, file imports and exports, and normal website requests.`;
 export const metadata: Metadata = {
   title: "Privacy and local storage",
   description,
   alternates: { canonical: "/privacy" },
-  openGraph: { title: "Privacy and local storage", description, url: "/privacy", type: "website", siteName: PRODUCT.name },
-  twitter: { card: "summary_large_image", title: "Privacy and local storage", description },
+  openGraph: { title: "Privacy and local storage", description, url: "/privacy", type: "website", siteName: PRODUCT.name, images: [SOCIAL_IMAGE] },
+  twitter: { card: "summary_large_image", title: "Privacy and local storage", description, images: [SOCIAL_IMAGE] },
 };
 
 export default function Privacy() {

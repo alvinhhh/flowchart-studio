@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { PRODUCT } from "@/lib/config";
+import { PRODUCT, SOCIAL_IMAGE } from "@/lib/config";
 import { PublicGuide } from "../_components/public-guide";
 
 const title = "How to draw a programming flowchart";
@@ -11,8 +11,8 @@ export const metadata: Metadata = {
   title,
   description,
   alternates: { canonical: path },
-  openGraph: { title, description, url: path, type: "article", siteName: PRODUCT.name },
-  twitter: { card: "summary_large_image", title, description },
+  openGraph: { title, description, url: path, type: "article", siteName: PRODUCT.name, images: [SOCIAL_IMAGE] },
+  twitter: { card: "summary_large_image", title, description, images: [SOCIAL_IMAGE] },
 };
 
 function LoopDiagram() {
