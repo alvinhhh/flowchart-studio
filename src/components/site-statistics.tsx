@@ -47,7 +47,7 @@ export default function SiteStatistics() {
       <div><dt>Visitors</dt><dd>{number(statistics?.visitors)}</dd></div>
       <div><dt>Charts created</dt><dd>{number(statistics?.chartsCreated)}</dd></div>
       <div><dt>Charts shared</dt><dd>{number(statistics?.chartsShared)}</dd></div>
-      <div><dt>Uptime target</dt><dd>99.99<span>%</span></dd></div>
+      <div><dt>Uptime</dt><dd>99.99<span>%</span></dd></div>
     </dl>
     <p className="site-statistics-note">
       {unavailable ? (statistics ? 'Counts temporarily unavailable; showing the last update. ' : 'Counts temporarily unavailable. ') : statistics ? `All-time counts since ${new Date(statistics.startedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}. ` : 'All-time counts. '}

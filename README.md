@@ -34,7 +34,7 @@ Shared snapshots have a 512 KiB plaintext limit and expire after 24 hours. Cloud
 
 The homepage shows all-time browser, chart creation, and share counts from the date counting began. A local browser marker prevents repeat visits from counting again. Clearing site data or using another profile counts as a new browser. A chart counts when a new local document is first saved with a shape or drawing; imports, examples, and copies count, but empty documents and later edits do not. A share counts after its encrypted snapshot is stored successfully.
 
-Metric requests contain only an event type, date, and random retry ID, never diagram contents or identifiers. Aggregate totals are stored in Cloudflare D1. Retry IDs are eligible for deletion after 48 hours and cleaned up on later activity. The browser respects Do Not Track and Global Privacy Control. Counts are approximate: blocked requests, offline use, cleared storage, and automated submissions can affect them. The displayed **99.99% uptime target** is a fixed target, not measured availability or a guarantee.
+Metric requests contain only an event type, date, and random retry ID, never diagram contents or identifiers. Aggregate totals are stored in Cloudflare D1. Retry IDs are eligible for deletion after 48 hours and cleaned up on later activity. The browser respects Do Not Track and Global Privacy Control. Counts are approximate: blocked requests, offline use, cleared storage, and automated submissions can affect them. The displayed **99.99% uptime** is a fixed value, not measured availability or a guarantee.
 
 ## Run locally
 
