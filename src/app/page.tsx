@@ -87,7 +87,7 @@ export default function Home() {
     browserRequirements: "Requires JavaScript and a modern browser with IndexedDB.",
     isAccessibleForFree: true,
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-    featureList: ["No account required", "No ads or analytics", "No server-side retention of diagram data", ...features.map(([title, detail]) => `${title}: ${detail}`)],
+    featureList: ["No account required", "No ads or analytics", "Local editing with optional encrypted 24-hour sharing", ...features.map(([title, detail]) => `${title}: ${detail}`)],
     }],
   };
 
@@ -103,7 +103,7 @@ export default function Home() {
           <div className="hero-copy">
             <p className="public-eyebrow">PROGRAMMING FLOWCHARTS</p>
             <h1 id="home-title">Free programming<br className="desktop-break" /> flowchart maker</h1>
-            <p className="public-lead">Draw algorithms, decisions, and loops with 32 shapes. Free, with no account, ads, or analytics. Save locally in your browser. No server-side retention of diagram data.</p>
+            <p className="public-lead">Draw algorithms, decisions, and loops with 32 shapes. Free, with no account, ads, or analytics. Save locally in your browser, or share an encrypted snapshot with a link that expires in 24 hours.</p>
             <div className="hero-actions"><Link className="public-primary" href="/app" prefetch={false}>Open editor <span aria-hidden="true">→</span></Link><Link className="public-example-link" href="/app?example=1" prefetch={false}>Open example</Link></div>
             <p className="hero-detail">JSON backups. PNG, SVG, and PDF export.</p>
           </div>
@@ -115,7 +115,7 @@ export default function Home() {
         </section>
         <div className="public-guide-grid">
           <section aria-labelledby="how-title"><h2 id="how-title">How to draw a flowchart</h2><ol className="public-steps"><li><strong>Add the steps.</strong> Use a process for an action and a decision for a condition.</li><li><strong>Connect the logic.</strong> Add arrows, label branches, and connect a later step back to an earlier one for a loop.</li><li><strong>Save a copy.</strong> Export JSON to keep editing later, or PNG, SVG, or PDF to share the diagram.</li></ol><div className="guide-links"><Link href="/guides/how-to-draw-a-flowchart">Drawing steps, branches, and loops →</Link><Link href="/guides/flowchart-symbols">Flowchart symbols and examples →</Link></div></section>
-          <section className="public-faq" aria-labelledby="faq-title"><h2 id="faq-title">Common questions</h2><details><summary>Is the editor free?</summary><p>Yes. The editor, browser saves, and JSON, PNG, SVG, and PDF exports are free. No account or payment is required. There are no ads or analytics.</p></details><details><summary>Where are my flowcharts saved?</summary><p>Projects are stored in IndexedDB in this browser on this device. Diagram content is not uploaded to a server. Clearing site data or using a private browsing session can remove your work. Export JSON backups for work you want to keep.</p></details><details><summary>Can I use it for branches and loops?</summary><p>Yes. Connect decision branches and label their arrows. Create a loop by connecting a later step to an earlier step. A connection directly from a node to itself is not supported.</p></details><details><summary>Does it turn a flowchart into code?</summary><p>No. This version is a diagram editor. It does not execute algorithms or generate source code.</p></details></section>
+          <section className="public-faq" aria-labelledby="faq-title"><h2 id="faq-title">Common questions</h2><details><summary>Is the editor free?</summary><p>Yes. The editor, browser saves, and JSON, PNG, SVG, and PDF exports are free. No account or payment is required. There are no ads or analytics.</p></details><details><summary>Where are my flowcharts saved?</summary><p>Projects are stored in IndexedDB in this browser on this device. Editing and saving do not upload diagram content. Creating a share link uploads an encrypted snapshot that expires after 24 hours. Clearing site data or using a private browsing session can remove your work. Export JSON backups for work you want to keep.</p></details><details><summary>Can I share a diagram?</summary><p>Yes. Choose Share to create an encrypted snapshot with a link that expires after 24 hours. Anyone with the link can view it or save a separate copy. Later edits do not update the snapshot.</p></details><details><summary>Can I use it for branches and loops?</summary><p>Yes. Connect decision branches and label their arrows. Create a loop by connecting a later step to an earlier step. A connection directly from a node to itself is not supported.</p></details><details><summary>Does it turn a flowchart into code?</summary><p>No. This version is a diagram editor. It does not execute algorithms or generate source code.</p></details></section>
         </div>
       </main>
       <footer className="public-footer"><span>{PRODUCT.name}</span><span>Built with &lt;3 by <a href="https://alvinhua.ng">Alvin Huang</a></span><a href="https://github.com/alvinhhh/flowchart-studio">GitHub</a><Link href="/guides/flowchart-symbols">Flowchart symbols</Link><Link href="/privacy">Privacy &amp; local storage</Link></footer>

@@ -1,6 +1,6 @@
 # Flowchart Studio
 
-A free, local browser editor for programming flowcharts. Draw branches and loops, save projects on this device, and export editable JSON, PNG, SVG, or PDF. Phase 1 includes no accounts, cloud storage, payments, analytics, or external APIs.
+A free, local browser editor for programming flowcharts. Draw branches and loops, save projects on this device, and export editable JSON, PNG, SVG, or PDF. Optional share links publish an encrypted, read-only snapshot for 24 hours. There are no accounts, payments, ads, or analytics.
 
 ## Run locally
 
@@ -40,6 +40,7 @@ Browser tests require Playwright’s Chromium and WebKit browsers (`npx playwrig
 - New, rename, duplicate, delete-confirmation and a device-local document list. Autosave restores the last document, checks revisions across tabs, and preserves work on storage failure.
 - Versioned editable JSON import/export, vector SVG, full-diagram PNG and one-page A4 PDF export. Imported diagrams get a new document identity while preserving graph IDs and content.
 - Blank canvas and an editable order-processing logic example with Yes/No branches, a merge at review, and a correction loop.
+- Encrypted 24-hour share links with a read-only viewer, pan/zoom, JSON download, and explicit Save a copy. Editing and saving do not upload diagrams.
 - Public homepage, privacy explanation, and guides to flowchart symbols and drawing programming flowcharts, with metadata, linked structured data, a sitemap and crawler rules. No editor bundle prefetch from the homepage.
 
 ## Structure
@@ -61,9 +62,9 @@ The [privacy page](http://localhost:3000/privacy) describes local storage, impor
 
 ## Hosting and configuration
 
-The production target is `https://flowchart.lol` on Cloudflare Pages. Run `npm run build:pages` with Node.js 22 to create the static `out/` directory. This command defaults `NEXT_PUBLIC_SITE_URL` to `https://flowchart.lol`; an explicitly set origin overrides it. Cloudflare Pages uses build command `npm run build:pages`, build output directory `out`, and Node.js 22 (also recorded in `.node-version`). No Pages Functions or server runtime are needed for the current editor. The Pages project is `flowchart-lol`; direct uploads publish only the contents of `out/`. The source repository remains on GitHub, but it is not connected to automatic Cloudflare builds. For an update, build and test the source, then upload the new `out/` contents as a production deployment in that Pages project. The generated `out/404.html` preserves real missing-page responses. Static assets include cache headers and the editor remains `noindex`.
+The production target is `https://flowchart.lol` on Cloudflare Pages. Run `npm run build:pages` with Node.js 22 to create the static `out/` directory. This command defaults `NEXT_PUBLIC_SITE_URL` to `https://flowchart.lol`; an explicitly set origin overrides it. Cloudflare Pages uses build command `npm run build:pages`, build output directory `out`, and Node.js 22 (also recorded in `.node-version`). The editor is static. Only `/api/shares*` invokes the generated Pages advanced-mode `_worker.js`; `_routes.json` keeps static requests outside the Function. Bind the `SHARES` variable to a dedicated Cloudflare KV namespace before deploying. The build uses the existing TypeScript dependency to emit the standalone worker. The Pages project is `flowchart-lol`; direct uploads publish only the contents of `out/`. The source repository remains on GitHub, but it is not connected to automatic Cloudflare builds. For an update, build and test the source, then upload the new `out/` contents as a production deployment in that Pages project. The generated `out/404.html` preserves real missing-page responses. Static assets include cache headers and the editor remains `noindex`.
 
-For a normal local Node.js preview, `npm run build` and `npm start` remain available. Do a normal build again after a Pages build before using `npm start`. It has no required database, account provider, billing provider, or vendor SDK. No paid infrastructure is required for the current static deployment. Local operation requires no service subscription. Cloudflare static asset requests are free and unlimited under the current Pages plan; build, file-count, and file-size limits still apply. Account access, DNS activation, and live HTTPS verification are separate from building the files. Search Console and Bing ownership verification require access to those services; sitemap submission and indexation must be verified separately.
+For a normal local Node.js preview, `npm run build` and `npm start` remain available. Do a normal build again after a Pages build before using `npm start`. Local editing needs no database, account provider, billing provider, or vendor SDK. Link sharing requires the Pages worker and KV binding; it is unavailable under plain `next dev` or `next start`. No paid infrastructure is required within the Workers and KV free quotas. Local operation requires no service subscription. Cloudflare static asset requests are free and unlimited under the current Pages plan; build, file-count, and file-size limits still apply. Account access, DNS activation, and live HTTPS verification are separate from building the files. Search Console and Bing ownership verification require access to those services; sitemap submission and indexation must be verified separately.
 
 The Pages build uses `https://flowchart.lol`. Set `NEXT_PUBLIC_SITE_URL` explicitly to build for another origin. It must be an absolute HTTP or HTTPS origin, with no path, credentials, query, or fragment. The local default is `http://localhost:3000`; it is not a production domain.
 
@@ -74,6 +75,23 @@ Metadata includes canonical URLs, Open Graph and Twitter metadata, an SVG icon, 
 Standard search practices apply to AI search features; there is no special AI markup. The current wildcard robots rule allows public crawling, including OAI-SearchBot and GPTBot. Search crawling and model-training crawling can be configured independently if the site's policy changes. Indexing or ranking is not guaranteed.
 
 References: [Next.js metadata](https://nextjs.org/docs/app/getting-started/metadata-and-og-images), [Google noindex](https://developers.google.com/search/docs/crawling-indexing/block-indexing), [Google AI search features](https://developers.google.com/search/docs/appearance/ai-features), [software application structured data](https://developers.google.com/search/docs/appearance/structured-data/software-app), [OpenAI crawlers](https://developers.openai.com/api/docs/bots).
+
+## Temporary sharing
+
+Choose **Share → Create link** (inside **Actions** on mobile). The browser validates the document and encrypts its JSON with AES-256-GCM, using a new 32-byte key and 12-byte IV. Only the version, IV and ciphertext are uploaded. The complete link is `/share#<random-id>.<key>`; the key stays in the URL fragment and is never sent to the sharing API. Anyone with the complete link can decrypt the snapshot. The snapshot includes notes as well as visible diagram content.
+
+`POST /api/shares` requires a same-origin JSON request and returns a random 128-bit ID and server expiry. `GET /api/shares/:id` returns the encrypted snapshot until expiry. KV has a 24-hour TTL and the worker also checks the stored expiry on every read. API responses use `no-store`; `/share` is `noindex`, `nofollow` and `no-referrer`. No share is automatically saved to IndexedDB; **Save a copy** creates fresh document and element IDs. Recipients can retain copies after the link expires.
+
+The plaintext sharing limit is 512KiB; the worker bounds and validates encrypted requests. Free KV quotas currently include 1,000 writes/day, 100,000 reads/day and 1 GB storage, shared across the account. Sharing fails visibly if storage or request quotas are exhausted; local editing remains available. Newly created links may briefly be unavailable in another region because KV is eventually consistent. The viewer makes bounded retries and provides a manual retry.
+
+To test sharing locally after `npm run build:pages`:
+
+```sh
+npx wrangler pages dev out --ip 127.0.0.1 --port 3000 --kv SHARES
+npx playwright test tests/sharing.spec.ts
+```
+
+Production uploads must include `_worker.js` and `_routes.json` alongside the static assets. The production `SHARES` namespace binding is configured in Pages settings. Normal development and browser data remain separate from production sharing storage.
 
 ## Roadmap
 
@@ -90,6 +108,6 @@ Verified on November 2, 2026 using macOS arm64, Node.js 22.23.4, Next.js 16.4.4,
 - Public HTML works with JavaScript disabled; metadata, free-only structured data, robots and the public sitemap entries agree. Instrumented editing and JSON export made zero HTTP requests after loading. Both engines passed automated axe checks with no serious/critical WCAG A/AA violations in the public page, Documents dialog and selected-node editor. Mobile checks at 390×844 passed collapsible controls, no horizontal overflow, and Help keyboard-focus restoration. Automated checks do not establish complete accessibility conformance.
 
 
-Not verified: physical drawing tablets and their individual drivers, actual Safari application, older browser releases, slow/mobile hardware, offline reopening, public deployment, live crawler access, search indexing or ranking. There is no account, cloud or billing integration to verify in this phase.
+Not verified: physical drawing tablets and their individual drivers, actual Safari application, older browser releases, slow/mobile hardware, offline reopening, public deployment, live crawler access, search indexing or ranking. Account sign-in and billing are not implemented.
 
 Cloudflare deployment validation: the static Pages build passes TypeScript and the editor/layout/export checks (40 browser cases across Chromium and WebKit). Public HTML and guide checks cover four sitemap routes, production canonical URLs, structured data, no-JavaScript content, mobile layout, and keyboard-accessible tables. Live DNS, TLS, and crawler access are verified separately at release.

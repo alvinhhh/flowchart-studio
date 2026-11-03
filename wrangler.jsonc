@@ -1,5 +1,8 @@
 {
   "name": "flowchart-lol",
   "pages_build_output_dir": "./out",
-  "compatibility_date": "2026-11-02"
+  "compatibility_date": "2026-11-02",
+  "kv_namespaces": [
+    { "binding": "SHARES", "id": "f226302b95354f238fbd8d94066d6647" }
+  ]
 }
