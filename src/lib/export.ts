@@ -1,5 +1,4 @@
 import type { Diagram, DiagramNode } from './diagram';
-import { jpegToPdf, pdfLayout } from './pdf';
 import { drawingBounds, drawingPath } from './drawing';
 import { routeDiagramEdge } from './routing';
 import { colorValues, labelWidth, nodePath, nodeTextBox, wrapLabel } from './geometry';
@@ -171,16 +170,14 @@ export async function downloadPng(diagram: Diagram): Promise<void> {
   download(blob, filename(diagram.title, 'png'));
 }
 
-/** A high-resolution image PDF; SVG is available when vector output is required. */
+/** Vector geometry and embedded text on a page sized to the complete diagram. */
 export async function downloadPdf(diagram: Diagram): Promise<void> {
-  const bounds = exportBounds(diagram);
-  const layout = pdfLayout(bounds.width, bounds.height);
-  const blob = await rasterize(diagram, layout.pixelWidth, layout.pixelHeight, 'PDF');
-  const bytes = jpegToPdf(new Uint8Array(await blob.arrayBuffer()), layout);
+  const { svgToPdf } = await import('./pdf');
+  const bytes = await svgToPdf(diagramToSvg(diagram));
   download(new Blob([bytes], { type: 'application/pdf' }), filename(diagram.title, 'pdf'));
 }
 
-async function rasterize(diagram: Diagram, width: number, height: number, format: 'PNG' | 'PDF'): Promise<Blob> {
+async function rasterize(diagram: Diagram, width: number, height: number, format: 'PNG'): Promise<Blob> {
   if (width > MAX_DIMENSION || height > MAX_DIMENSION || width * height > MAX_PIXELS) {
     throw new Error(`This diagram is too large to render as ${format}. Try exporting SVG.`);
   }
@@ -204,7 +201,7 @@ async function rasterize(diagram: Diagram, width: number, height: number, format
     context.fillStyle = '#ffffff';
     context.fillRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
-    return await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error(`The browser could not finish the ${format}. Try exporting SVG.`)), format === 'PDF' ? 'image/jpeg' : 'image/png', 0.98));
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error(`The browser could not finish the ${format}. Try exporting SVG.`)), 'image/png'));
   } finally {
     URL.revokeObjectURL(url);
     canvas.width = 0;
