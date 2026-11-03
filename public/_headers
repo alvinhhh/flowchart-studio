@@ -7,3 +7,6 @@
 
 /app
   X-Robots-Tag: noindex, follow
+
+/opengraph-image
+  Content-Type: image/png
