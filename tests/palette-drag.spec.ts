@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
 
 type Point = { x: number; y: number };
 type StoredNode = { id: string; type: string; width: number; height: number; position: Point };
@@ -61,11 +61,77 @@ async function pointerDrag(page: Page, source: Locator, target: Point, cancel = 
   await page.mouse.up();
 }
 
+/** A fast drag has only one move before release: no preview-settling moves or pause. */
+async function quickPointerDrag(page: Page, source: Locator, target: Point) {
+  await source.scrollIntoViewIfNeeded();
+  const bounds = (await source.boundingBox())!;
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target.x, target.y);
+  await page.mouse.up();
+}
+
+/** Sends real browser input with no delivered move between press and release. */
+async function releaseWithoutMove(page: Page, context: BrowserContext, source: Locator, target: Point) {
+  await source.scrollIntoViewIfNeeded();
+  const bounds = (await source.boundingBox())!;
+  const start = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+  const input = await context.newCDPSession(page);
+  await input.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...start });
+  await input.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...start });
+  await input.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...target });
+  await input.detach();
+}
+
 async function singleDroppedNode(page: Page, title: string) {
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
   await expect.poll(async () => (await documentByTitle(page, title))?.nodes.length).toBe(1);
   return (await documentByTitle(page, title))!.nodes[0];
 }
+
+for (const sourcePart of ['svg', 'span'] as const) {
+  test(`a fast palette drag from the ${sourcePart === 'svg' ? 'shape' : 'label'} adds one shape at release under pan and zoom`, async ({ page }) => {
+    const title = `Fast palette drop ${sourcePart}`;
+    const viewport = await prepare(page, title, false);
+    const target = await canvasTarget(page);
+    const source = page.getByRole('button', { name: 'Add Process', exact: true }).locator(sourcePart);
+    if (sourcePart === 'span') {
+      const bounds = (await source.boundingBox())!;
+      target.point = { x: Math.ceil(target.origin.x) + 3, y: Math.round(bounds.y + bounds.height / 2) };
+    }
+    await quickPointerDrag(page, source, target.point);
+    const node = await singleDroppedNode(page, title);
+    expect(node.type).toBe('process');
+    expect(node.position.x).toBeCloseTo((target.point.x - target.origin.x - viewport.x) / viewport.zoom - node.width / 2, 4);
+    expect(node.position.y).toBeCloseTo((target.point.y - target.origin.y - viewport.y) / viewport.zoom - node.height / 2, 4);
+  });
+}
+
+test('a palette release across the drag threshold adds a shape when no move event was delivered', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'CDP allows a release coordinate without an intervening move event.');
+  const title = 'Palette release without a move';
+  const viewport = await prepare(page, title, false);
+  const target = await canvasTarget(page);
+  const source = page.getByRole('button', { name: 'Add Process', exact: true }).locator('svg');
+  await releaseWithoutMove(page, context, source, target.point);
+  const node = await singleDroppedNode(page, title);
+  expect(node.type).toBe('process');
+  expect(node.position.x).toBeCloseTo((target.point.x - target.origin.x - viewport.x) / viewport.zoom - node.width / 2, 4);
+  expect(node.position.y).toBeCloseTo((target.point.y - target.origin.y - viewport.y) / viewport.zoom - node.height / 2, 4);
+});
+
+test('a palette release outside the canvas adds nothing when no move event was delivered', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'CDP allows a release coordinate without an intervening move event.');
+  const title = 'Outside palette release without a move';
+  await prepare(page, title, true);
+  const source = page.getByRole('button', { name: 'Add Process', exact: true }).locator('span');
+  const header = (await page.locator('.editor-header').boundingBox())!;
+  await releaseWithoutMove(page, context, source, { x: Math.round(header.x + header.width / 2), y: Math.round(header.y + header.height / 2) });
+  await expect(page.locator('.react-flow__node')).toHaveCount(0);
+  expect((await documentByTitle(page, title))!.nodes).toHaveLength(0);
+  await page.getByRole('button', { name: 'Add Process', exact: true }).click();
+  await expect(page.locator('.react-flow__node')).toHaveCount(1);
+});
 
 test('a palette drag places one snapped shape at the cursor under pan and zoom, with undo, redo and reload', async ({ page }) => {
   const title = 'Snapped palette drop';

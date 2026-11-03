@@ -23,6 +23,7 @@ import Modal from './modal';
 
 const nodeTypes = { shape: ShapeNode };
 const edgeTypes = { routed: EditableEdge };
+const PALETTE_DRAG_DISTANCE = 6;
 type PaletteDrag = { node: DiagramNode; documentId: string; pointerId: number; start: { x: number; y: number }; point: { x: number; y: number }; active: boolean; canceled: boolean };
 function nodeHandles(node: DiagramNode) {
   const positions = { top: Position.Top, right: Position.Right, bottom: Position.Bottom, left: Position.Left };
@@ -278,18 +279,20 @@ function Workspace() {
     if (!drag || drag.pointerId !== event.pointerId || drag.canceled) return;
     const point = { x: event.clientX, y: event.clientY };
     drag.point = point;
-    if (!drag.active && Math.hypot(point.x - drag.start.x, point.y - drag.start.y) < 6) return;
+    if (!drag.active && Math.hypot(point.x - drag.start.x, point.y - drag.start.y) < PALETTE_DRAG_DISTANCE) return;
     drag.active = true; event.preventDefault();
     updatePalettePreview(point, event.altKey);
   };
   const finishPaletteDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
     const drag = paletteDrag.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
+    const point = { x: event.clientX, y: event.clientY };
+    // A quick release can arrive before a movement update. Use its position too.
+    drag.active ||= Math.hypot(point.x - drag.start.x, point.y - drag.start.y) >= PALETTE_DRAG_DISTANCE;
     if (drag.active || drag.canceled) {
       event.preventDefault();
       suppressPaletteClick.current = true;
       setTimeout(() => { suppressPaletteClick.current = false; }, 0);
-      const point = { x: event.clientX, y: event.clientY };
       const d = store.current.current?.present;
       if (!drag.canceled && !readonly && d?.documentId === drag.documentId && insideCanvas(point)) {
         const { node } = palettePlacement(drag.node, point, event.altKey);
