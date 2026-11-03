@@ -1,3 +1,5 @@
+import { countSharedChart, handleMetricsRequest, type MetricsEnvironment, type WorkerExecutionContext } from './metrics';
+
 export const SHARE_TTL_SECONDS = 24 * 60 * 60;
 export const MAX_CIPHERTEXT_BYTES = 512 * 1024 + 16;
 export const MAX_REQUEST_BYTES = 700 * 1024;
@@ -17,7 +19,7 @@ export interface ShareStore {
   put(key: string, value: string, options: { expirationTtl: number }): Promise<void>;
 }
 
-export interface ShareEnvironment {
+export interface ShareEnvironment extends MetricsEnvironment {
   SHARES?: ShareStore;
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
@@ -91,7 +93,7 @@ async function readEnvelope(request: Request): Promise<unknown> {
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
 }
 
-async function createShare(request: Request, env: ShareEnvironment): Promise<Response> {
+async function createShare(request: Request, env: ShareEnvironment, ctx?: WorkerExecutionContext): Promise<Response> {
   if (request.headers.get('Origin') !== new URL(request.url).origin) {
     return failure('This request must come from this site.', 403);
   }
@@ -117,6 +119,11 @@ async function createShare(request: Request, env: ShareEnvironment): Promise<Res
     await env.SHARES.put(id, JSON.stringify(stored), { expirationTtl: SHARE_TTL_SECONDS });
   } catch {
     return failure('Sharing is unavailable. Try again later.', 503);
+  }
+  if (new URL(request.url).origin === (env.SITE_ORIGIN ?? 'https://flowchart.lol')) {
+    const counting = countSharedChart(env).catch(() => {});
+    if (ctx) ctx.waitUntil(counting);
+    else await counting;
   }
   return json({ id, expiresAt }, 201);
 }
@@ -144,11 +151,13 @@ async function getShare(id: string, env: ShareEnvironment): Promise<Response> {
   }
 }
 
-export async function handleRequest(request: Request, env: ShareEnvironment): Promise<Response> {
+export async function handleRequest(request: Request, env: ShareEnvironment, ctx?: WorkerExecutionContext): Promise<Response> {
+  const metricsResponse = await handleMetricsRequest(request, env);
+  if (metricsResponse) return metricsResponse;
   const { pathname } = new URL(request.url);
   if (pathname === '/api/shares') {
     if (request.method !== 'POST') return failure('Method not allowed.', 405, { Allow: 'POST' });
-    return createShare(request, env);
+    return createShare(request, env, ctx);
   }
   const match = /^\/api\/shares\/([^/]+)$/.exec(pathname);
   if (match) {

@@ -52,7 +52,7 @@ export function PublicGuide({ title, description, path, relatedPath, relatedTitl
           {children}
         </article>
         <aside className="guide-related" aria-label="Related guide"><h2>Related guide</h2><Link href={relatedPath}>{relatedTitle} →</Link></aside>
-        <div className="guide-editor"><Link className="public-primary" href="/app" prefetch={false}>Open editor <span aria-hidden="true">→</span></Link><p>Free. No account, ads, or analytics. Export JSON to keep an editable backup.</p></div>
+        <div className="guide-editor"><Link className="public-primary" href="/app" prefetch={false}>Open editor <span aria-hidden="true">→</span></Link><p>Free. No account or ads. Export JSON to keep an editable backup.</p></div>
       </main>
       <footer className="public-footer"><Link href="/">{PRODUCT.name}</Link><span>Built with &lt;3 by <a href="https://alvinhua.ng">Alvin Huang</a></span><a href="https://github.com/alvinhhh/flowchart-studio">GitHub</a><Link href="/privacy">Privacy &amp; local storage</Link></footer>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }} />

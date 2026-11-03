@@ -22,6 +22,8 @@ interface ShapeGeometry { outline: Trace; details?: Trace[] }
 const trace = (start: Pair, parts: Part[], closed = false): Trace => ({ start, parts, closed });
 const polygon = (...points: Pair[]): Trace => trace(points[0], points.slice(1), true);
 const rectangle = (): Trace => polygon([0, 0], [1, 0], [1, 1], [0, 1]);
+const rightArrow: Pair[] = [[0, 0.27], [0.62, 0.27], [0.62, 0], [1, 0.5], [0.62, 1], [0.62, 0.73], [0, 0.73]];
+const horizontalArrow: Pair[] = [[0, 0.5], [0.28, 0], [0.28, 0.27], [0.72, 0.27], [0.72, 0], [1, 0.5], [0.72, 1], [0.72, 0.73], [0.28, 0.73], [0.28, 1]];
 const K = 0.5522847498307936;
 const size = (value: number) => Number.isFinite(value) && value > 0 ? value : 1;
 
@@ -89,6 +91,23 @@ function shapeGeometry(type: NodeKind, w: number, h: number): ShapeGeometry {
     case 'annotation': return { outline: polygon([0, 0], [0.16, 0], [0.16, 0.08], [1, 0.08], [1, 0.92], [0.16, 0.92], [0.16, 1], [0, 1]) };
     case 'loop_limit': return { outline: polygon([0, 0.25], [0.2, 0], [0.8, 0], [1, 0.25], [1, 1], [0, 1]) };
     case 'parallel': return { outline: rectangle(), details: [trace([0, 0.28], [[1, 0.28]]), trace([0, 0.72], [[1, 0.72]])] };
+    case 'octagon': return { outline: polygon([0.3, 0], [0.7, 0], [1, 0.3], [1, 0.7], [0.7, 1], [0.3, 1], [0, 0.7], [0, 0.3]) };
+    case 'star': return { outline: polygon([0.5, 0], [0.62, 0.37], [1, 0.38], [0.69, 0.61], [0.81, 1], [0.5, 0.76], [0.19, 1], [0.31, 0.61], [0, 0.38], [0.38, 0.37]) };
+    case 'cloud': return { outline: trace([0.22, 0.88], [
+      [0.08, 0.88, 0, 0.77, 0, 0.62], [0, 0.46, 0.07, 0.35, 0.18, 0.34],
+      [0.16, 0.15, 0.3, 0, 0.48, 0], [0.67, 0, 0.82, 0.14, 0.82, 0.32],
+      [0.94, 0.32, 1, 0.44, 1, 0.6], [1, 0.77, 0.9, 0.88, 0.77, 0.88],
+      [0.72, 0.96, 0.61, 1, 0.5, 1], [0.39, 1, 0.28, 0.96, 0.22, 0.88],
+    ], true) };
+    case 'cross': return { outline: polygon([0.32, 0], [0.68, 0], [0.68, 0.32], [1, 0.32], [1, 0.68], [0.68, 0.68], [0.68, 1], [0.32, 1], [0.32, 0.68], [0, 0.68], [0, 0.32], [0.32, 0.32]) };
+    case 'speech_bubble': return { outline: polygon([0, 0], [1, 0], [1, 0.75], [0.58, 0.75], [0.4, 1], [0.4, 0.75], [0, 0.75]) };
+    case 'arrow_right': return { outline: polygon(...rightArrow) };
+    case 'arrow_left': return { outline: polygon(...rightArrow.map(([x, y]): Pair => [1 - x, y])) };
+    case 'arrow_up': return { outline: polygon(...rightArrow.map(([x, y]): Pair => [y, 1 - x])) };
+    case 'arrow_down': return { outline: polygon(...rightArrow.map(([x, y]): Pair => [1 - y, x])) };
+    case 'arrow_horizontal': return { outline: polygon(...horizontalArrow) };
+    case 'arrow_vertical': return { outline: polygon(...horizontalArrow.map(([x, y]): Pair => [y, 1 - x])) };
+    case 'chevron': return { outline: polygon([0, 0], [0.68, 0], [1, 0.5], [0.68, 1], [0, 1], [0.3, 0.5]) };
   }
 }
 
@@ -137,6 +156,18 @@ export function nodeTextBox(type: NodeKind, width: number, height: number): { x:
     case 'annotation': region = [0.57, 0.5, 0.7, 0.65]; break;
     case 'loop_limit': region = [0.5, 0.57, 0.75, 0.6]; break;
     case 'parallel': region = [0.5, 0.5, 0.78, 0.34]; break;
+    case 'octagon': region = [0.5, 0.5, 0.7, 0.5]; break;
+    case 'star': region = [0.5, 0.57, 0.28, 0.2]; break;
+    case 'cloud': region = [0.5, 0.56, 0.58, 0.4]; break;
+    case 'cross': region = [0.5, 0.5, 0.6, 0.24]; break;
+    case 'speech_bubble': region = [0.5, 0.37, 0.78, 0.55]; break;
+    case 'arrow_right': region = [0.35, 0.5, 0.54, 0.32]; break;
+    case 'arrow_left': region = [0.65, 0.5, 0.54, 0.32]; break;
+    case 'arrow_up': region = [0.5, 0.65, 0.32, 0.54]; break;
+    case 'arrow_down': region = [0.5, 0.35, 0.32, 0.54]; break;
+    case 'arrow_horizontal': region = [0.5, 0.5, 0.4, 0.32]; break;
+    case 'arrow_vertical': region = [0.5, 0.5, 0.32, 0.4]; break;
+    case 'chevron': region = [0.56, 0.5, 0.36, 0.48]; break;
   }
   return { x: region[0] * w, y: region[1] * h, width: region[2] * w, height: region[3] * h };
 }

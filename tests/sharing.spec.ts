@@ -89,7 +89,7 @@ async function expectViewer(page: Page, title: string) {
 
 function apiRequests(page: Page) {
   const requests: Request[] = [];
-  page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/')) requests.push(request); });
+  page.on('request', request => { if (new URL(request.url()).pathname.startsWith('/api/shares')) requests.push(request); });
   return requests;
 }
 

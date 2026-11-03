@@ -1,4 +1,5 @@
 import { type Diagram, validateDiagram } from './diagram';
+import { METRIC_EVENTS, METRIC_STATE, MetricsClient, upgradeMetricStores, type MetricsClientOptions } from './metrics-client';
 
 export interface DiagramRepository {
   list(): Promise<Diagram[]>;
@@ -28,7 +29,10 @@ const DELETED = 'deletedDiagrams';
 /** All comparisons and writes share a transaction, including deletion tombstones. */
 export class IndexedDBDiagramRepository implements DiagramRepository {
   private database?: Promise<IDBDatabase>;
-  constructor(private readonly dbName = 'flowchart-studio', private readonly factory?: IDBFactory) {}
+  readonly metrics: MetricsClient;
+  constructor(private readonly dbName = 'flowchart-studio', private readonly factory?: IDBFactory, metricsOptions?: MetricsClientOptions) {
+    this.metrics = new MetricsClient(() => this.open(), metricsOptions);
+  }
 
   private open(): Promise<IDBDatabase> {
     if (this.database) return this.database;
@@ -36,12 +40,13 @@ export class IndexedDBDiagramRepository implements DiagramRepository {
       const factory = this.factory ?? globalThis.indexedDB;
       if (!factory) { reject(new StorageError(new Error('IndexedDB is unavailable'))); return; }
       let request: IDBOpenDBRequest;
-      try { request = factory.open(this.dbName, 1); } catch (error) { reject(storageError(error)); return; }
+      try { request = factory.open(this.dbName, 2); } catch (error) { reject(storageError(error)); return; }
       let rejected = false;
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(DIAGRAMS)) db.createObjectStore(DIAGRAMS, { keyPath: 'documentId' });
         if (!db.objectStoreNames.contains(DELETED)) db.createObjectStore(DELETED, { keyPath: 'documentId' });
+        if (!db.objectStoreNames.contains(METRIC_STATE)) upgradeMetricStores(db);
       };
       request.onsuccess = () => {
         const db = request.result;
@@ -86,12 +91,22 @@ export class IndexedDBDiagramRepository implements DiagramRepository {
     if (expectedRevision !== null && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || expectedRevision >= Number.MAX_SAFE_INTEGER)) {
       throw new ConflictError('The saved revision is invalid. Save this diagram as a copy.');
     }
-    return this.mutate(clean.documentId, (store, _deleted, current, tombstone) => {
+    const change = (store: IDBObjectStore, _deleted: IDBObjectStore, current: Diagram | undefined, tombstone: unknown, tx?: IDBTransaction) => {
       if (expectedRevision === null ? current !== undefined || tombstone !== undefined : !current || current.revision !== expectedRevision) throw new ConflictError();
       const saved: Diagram = { ...clean, revision: (expectedRevision ?? 0) + 1, updatedAt: new Date().toISOString() };
       store.put(saved);
+      if (tx) this.metrics.recordChartSave(tx, saved.documentId, current === undefined, saved.nodes.length > 0 || saved.drawings.length > 0);
       return saved;
-    });
+    };
+    let saved: Diagram;
+    try { saved = await this.mutate(clean.documentId, change, true); }
+    catch (error) {
+      if (error instanceof ConflictError) throw error;
+      // If counter bookkeeping fails, retry the document write on its own.
+      saved = await this.mutate(clean.documentId, change);
+    }
+    void this.metrics.flush();
+    return saved;
   }
   async delete(id: string, expectedRevision: number): Promise<void> {
     await this.mutate(id, (store, deleted, current) => {
@@ -100,12 +115,12 @@ export class IndexedDBDiagramRepository implements DiagramRepository {
       deleted.put({ documentId: id, revision: current.revision + 1, deletedAt: new Date().toISOString() });
     });
   }
-  private async mutate<T>(id: string, change: (store: IDBObjectStore, deleted: IDBObjectStore, current: Diagram | undefined, tombstone: unknown) => T): Promise<T> {
+  private async mutate<T>(id: string, change: (store: IDBObjectStore, deleted: IDBObjectStore, current: Diagram | undefined, tombstone: unknown, tx?: IDBTransaction) => T, metrics = false): Promise<T> {
     const db = await this.open();
     return new Promise<T>((resolve, reject) => {
       let failure: unknown;
       try {
-        const tx = db.transaction([DIAGRAMS, DELETED], 'readwrite');
+        const tx = db.transaction(metrics ? [DIAGRAMS, DELETED, METRIC_STATE, METRIC_EVENTS] : [DIAGRAMS, DELETED], 'readwrite');
         const store = tx.objectStore(DIAGRAMS);
         const deleted = tx.objectStore(DELETED);
         const currentRequest = store.get(id);
@@ -115,7 +130,7 @@ export class IndexedDBDiagramRepository implements DiagramRepository {
         const ready = () => {
           remaining -= 1;
           if (remaining !== 0) return;
-          try { result = change(store, deleted, currentRequest.result as Diagram | undefined, deletedRequest.result); }
+          try { result = change(store, deleted, currentRequest.result as Diagram | undefined, deletedRequest.result, metrics ? tx : undefined); }
           catch (error) { failure = error; tx.abort(); }
         };
         currentRequest.onsuccess = ready;
@@ -127,4 +142,5 @@ export class IndexedDBDiagramRepository implements DiagramRepository {
   }
 }
 
-export const diagramRepository: DiagramRepository = new IndexedDBDiagramRepository();
+export const diagramRepository = new IndexedDBDiagramRepository();
+export const diagramMetrics = diagramRepository.metrics;

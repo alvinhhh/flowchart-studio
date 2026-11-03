@@ -172,9 +172,9 @@ test('text fields and dialogs keep Delete shortcuts from deleting selected shape
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
   await field.fill('After field edit');
   await field.press('Tab');
-  await page.getByRole('button', { name: 'Help', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Help', exact: true }).getByRole('button', { name: 'Close dialog', exact: true }).press('Delete');
-  await expect(page.getByRole('dialog', { name: 'Help', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Local storage & help', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Local storage & help', exact: true }).getByRole('button', { name: 'Close dialog', exact: true }).press('Delete');
+  await expect(page.getByRole('dialog', { name: 'Local storage & help', exact: true })).toBeVisible();
   await expect(page.locator('.react-flow__node')).toHaveCount(1);
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await expect(page.locator('.react-flow__node')).toContainText('After field edit');

@@ -1,8 +1,22 @@
 {
   "name": "flowchart-lol",
   "pages_build_output_dir": "./out",
-  "compatibility_date": "2026-11-02",
+  "compatibility_date": "2026-11-03",
   "kv_namespaces": [
-    { "binding": "SHARES", "id": "f226302b95354f238fbd8d94066d6647" }
+    {
+      "binding": "SHARES",
+      "id": "f226302b95354f238fbd8d94066d6647"
+    }
+  ],
+  "vars": {
+    "SITE_ORIGIN": "https://flowchart.lol"
+  },
+  "d1_databases": [
+    {
+      "binding": "METRICS",
+      "database_name": "flowchart-metrics",
+      "database_id": "ba56f8b9-3f24-482a-9f1f-d69d5d5166a2",
+      "migrations_dir": "migrations"
+    }
   ]
 }

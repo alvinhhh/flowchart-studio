@@ -26,7 +26,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 568 }
     expect(Math.max(...toolCenters) - Math.min(...toolCenters)).toBeLessThanOrEqual(1);
     await testInfo.attach('layout', { body: JSON.stringify({ viewport, toolbarHeight: bounds.height, canvasHeight: canvas.height, canvasRatio: canvas.height / viewport.height }), contentType: 'application/json' });
     await expect(page.getByRole('button', { name: 'Documents', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Help', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Local storage & help', exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath(`mobile-editor-${viewport.width}.png`), fullPage: true });
   });
 }

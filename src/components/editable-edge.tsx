@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, useId, type KeyboardEvent, type PointerEvent } from 'react';
 import { BaseEdge, EdgeLabelRenderer, useReactFlow, type EdgeProps } from '@xyflow/react';
+import { edgeDashArray, edgeMarkerId, edgeMarkersMarkup, resolveEdgeStyle } from '@/lib/connectors';
 import type { DiagramEdge, DiagramNode } from '@/lib/diagram';
 import { colorValues, edgeRoute, labelWidth, wrapLabel, type Point } from '@/lib/geometry';
 import { routeDiagramEdge } from '@/lib/routing';
@@ -20,6 +21,8 @@ const equalPoints = (a: Point[], b: Point[]) => a.length === b.length && a.every
 export function EditableEdge(props: EdgeProps) {
   const data = props.data as unknown as EditableEdgeData | undefined;
   const model = data?.model;
+  const markerPrefix = `edge-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}-`;
+  const edgeStyle = resolveEdgeStyle(model?.style);
   const [preview, setPreview] = useState<Point[] | null>(null);
   const [activeControl, setActiveControl] = useState<{ key: string; index: number; insert: boolean } | null>(null);
   const drag = useRef<Drag | null>(null);
@@ -105,7 +108,11 @@ export function EditableEdge(props: EdgeProps) {
   }
 
   return <>
-    <BaseEdge id={props.id} path={route.path} markerEnd={props.markerEnd} interactionWidth={24} style={{ stroke: props.selected ? '#171717' : colors.stroke, strokeWidth: props.selected ? 2.5 : 1.5 }} />
+    <defs dangerouslySetInnerHTML={{ __html: edgeMarkersMarkup(model?.style, markerPrefix) }} />
+    <BaseEdge id={props.id} path={route.path}
+      markerStart={edgeStyle.startMarker === 'none' ? undefined : `url(#${edgeMarkerId(edgeStyle.startMarker, edgeStyle.color, edgeStyle.width, markerPrefix)})`}
+      markerEnd={edgeStyle.endMarker === 'none' ? undefined : `url(#${edgeMarkerId(edgeStyle.endMarker, edgeStyle.color, edgeStyle.width, markerPrefix)})`}
+      interactionWidth={24} style={{ stroke: colors.stroke, strokeWidth: edgeStyle.width, strokeDasharray: edgeDashArray(model?.style), strokeLinecap: 'round', strokeLinejoin: 'round' }} />
     <EdgeLabelRenderer>
       {label && <div className="edge-label nodrag nopan" style={{ transform: `translate(-50%, -50%) translate(${route.labelX}px, ${route.labelY}px)`, width }} aria-hidden="true">{lines.map((line, i) => <div key={i}>{line || '\u00a0'}</div>)}</div>}
       {editable && controls.map(({ point, index, insert, key }) => <button key={key} type="button" data-control-key={key}

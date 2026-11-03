@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { handlePoint, nodePath, nodeTextBox, type Point } from './geometry';
+import { handlePoint, nodePath, nodeTextBox, wrapLabel, type Point } from './geometry';
 import { NODE_DEFINITIONS, NODE_TYPES, NODE_TYPE_LABELS } from './shapes';
+import { createNode, newDiagram, parseDiagram, serializeDiagram } from './diagram';
+
+const ADDED_SHAPES = ['octagon', 'star', 'cloud', 'cross', 'speech_bubble', 'arrow_right', 'arrow_left', 'arrow_up', 'arrow_down', 'arrow_horizontal', 'arrow_vertical', 'chevron'] as const;
 
 /** Samples SVG commands independently so outline and anchor regressions are checked together. */
 function samplePaths(path: string): Point[][] {
@@ -50,9 +53,9 @@ function inside(point: Point, polygon: Point[]) {
 }
 
 describe('shape library', () => {
-  it('defines 32 distinct kinds with usable defaults and searchable metadata', () => {
-    expect(NODE_TYPES).toHaveLength(32);
-    expect(new Set(NODE_TYPES).size).toBe(32);
+  it('defines 44 distinct kinds with usable defaults and searchable metadata', () => {
+    expect(NODE_TYPES).toHaveLength(44);
+    expect(new Set(NODE_TYPES).size).toBe(44);
     expect(Object.keys(NODE_DEFINITIONS).sort()).toEqual([...NODE_TYPES].sort());
     expect(NODE_TYPES.filter(type => NODE_DEFINITIONS[type].group === 'Basic')).toEqual(['terminal', 'process', 'decision', 'io', 'function', 'note']);
     for (const type of NODE_TYPES) {
@@ -67,6 +70,9 @@ describe('shape library', () => {
     expect(NODE_DEFINITIONS.connector.defaultLabel).toBe('A');
     expect(NODE_DEFINITIONS.summing_junction.defaultLabel).toBe('');
     expect(NODE_DEFINITIONS.or.defaultLabel).toBe('');
+    expect(NODE_TYPES.slice(32)).toEqual(ADDED_SHAPES);
+    expect(NODE_TYPES.filter(type => NODE_DEFINITIONS[type].group === 'Geometry')).toEqual(ADDED_SHAPES.slice(0, 5));
+    expect(NODE_TYPES.filter(type => NODE_DEFINITIONS[type].group === 'Block arrows')).toEqual(ADDED_SHAPES.slice(5));
   });
 
   it('gives every kind a distinctive SVG path rather than a rectangle fallback', () => {
@@ -138,5 +144,31 @@ describe('shape library', () => {
       expect(nodePath(type, Number.NaN, Infinity)).not.toMatch(/NaN|Infinity/);
       expect(Object.values(nodeTextBox(type, 0, -1)).every(Number.isFinite)).toBe(true);
     }
+  });
+
+  it('places directional arrow handles on the arrow tips and shaft rather than the bounding box', () => {
+    const base = { width: 200, height: 100, position: { x: 0, y: 0 } };
+    for (const type of ['arrow_right', 'arrow_left', 'arrow_horizontal'] as const) {
+      expect(handlePoint({ ...base, type }, 'top')).toEqual({ x: 100, y: 27 });
+      expect(handlePoint({ ...base, type }, 'bottom')).toEqual({ x: 100, y: 73 });
+      expect(handlePoint({ ...base, type }, 'left')).toEqual({ x: 0, y: 50 });
+      expect(handlePoint({ ...base, type }, 'right')).toEqual({ x: 200, y: 50 });
+    }
+    for (const type of ['arrow_up', 'arrow_down', 'arrow_vertical'] as const) {
+      expect(handlePoint({ ...base, type }, 'top')).toEqual({ x: 100, y: 0 });
+      expect(handlePoint({ ...base, type }, 'bottom')).toEqual({ x: 100, y: 100 });
+      expect(handlePoint({ ...base, type }, 'left').x).toBeCloseTo(54);
+      expect(handlePoint({ ...base, type }, 'right').x).toBeCloseTo(146);
+    }
+    expect(handlePoint({ ...base, type: 'chevron' }, 'left')).toEqual({ x: 60, y: 50 });
+    expect(handlePoint({ ...base, type: 'speech_bubble' }, 'bottom').y).toBeCloseTo(86.111111);
+  });
+
+  it.each(ADDED_SHAPES)('%s fits its default label and round trips through the existing JSON schema', type => {
+    const node = createNode(type, { x: 13.5, y: -42 });
+    const box = nodeTextBox(type, node.width, node.height);
+    expect(wrapLabel(node.label, box.width).length * 20).toBeLessThanOrEqual(box.height);
+    const diagram = { ...newDiagram('Expanded shapes'), nodes: [node] };
+    expect(parseDiagram(serializeDiagram(diagram))).toEqual(diagram);
   });
 });

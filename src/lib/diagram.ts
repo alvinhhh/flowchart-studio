@@ -1,5 +1,7 @@
 import { NODE_TYPES, NODE_TYPE_LABELS, NODE_DEFINITIONS, type NodeKind } from './shapes';
 import type { DrawingStroke } from './drawing';
+import { EDGE_LINE_STYLES, EDGE_MARKERS, type EdgeStyle } from './connectors';
+export type { EdgeStyle, EdgeMarker, EdgeLineStyle } from './connectors';
 export { NODE_TYPES, NODE_TYPE_LABELS, NODE_DEFINITIONS, type NodeKind } from './shapes';
 export const COLORS = ['neutral', 'blue', 'amber', 'rose', 'violet'] as const;
 export const HANDLES = ['top', 'right', 'bottom', 'left'] as const;
@@ -29,7 +31,7 @@ export interface DiagramEdge {
   sourceHandle: HandleId;
   targetHandle: HandleId;
   label: string;
-  style: { color: ColorName };
+  style: EdgeStyle;
   waypoints?: { x: number; y: number }[];
 }
 export interface Diagram {
@@ -91,6 +93,16 @@ function color(value: unknown, path: string): { color: ColorName } {
   return { color: choice(style.color, COLORS, `${path}.color`) };
 }
 
+function edgeStyle(value: unknown, path: string): EdgeStyle {
+  const style = object(value, ['color', 'lineStyle', 'width', 'startMarker', 'endMarker'], path, ['lineStyle', 'width', 'startMarker', 'endMarker']);
+  return { color: choice(style.color, COLORS, `${path}.color`),
+    ...(style.lineStyle === undefined ? {} : { lineStyle: choice(style.lineStyle, EDGE_LINE_STYLES, `${path}.lineStyle`) }),
+    ...(style.width === undefined ? {} : { width: number(style.width, 1, 8, `${path}.width`) }),
+    ...(style.startMarker === undefined ? {} : { startMarker: choice(style.startMarker, EDGE_MARKERS, `${path}.startMarker`) }),
+    ...(style.endMarker === undefined ? {} : { endMarker: choice(style.endMarker, EDGE_MARKERS, `${path}.endMarker`) }),
+  };
+}
+
 /** Validates unknown portable data and returns a fresh, editor-independent document. */
 export function validateDiagram(value: unknown): Diagram {
   if (value && typeof value === 'object' && 'schemaVersion' in value && (value as {schemaVersion: unknown}).schemaVersion !== 1) {
@@ -138,7 +150,7 @@ export function validateDiagram(value: unknown): Diagram {
     const target = string(edge.target, 200, `${path}.target`, true);
     if (!nodeIds.has(source) || !nodeIds.has(target)) fail(`${path} references a missing node.`);
     if (source === target) fail(`${path}: connections back to the same node are not supported in this version. Connect through another node.`);
-    return { id: id(edge.id, `${path}.id`), source, target, sourceHandle: choice(edge.sourceHandle, HANDLES, `${path}.sourceHandle`), targetHandle: choice(edge.targetHandle, HANDLES, `${path}.targetHandle`), label: string(edge.label, 4000, `${path}.label`), style: color(edge.style, `${path}.style`), ...(waypoints === undefined ? {} : { waypoints }) };
+    return { id: id(edge.id, `${path}.id`), source, target, sourceHandle: choice(edge.sourceHandle, HANDLES, `${path}.sourceHandle`), targetHandle: choice(edge.targetHandle, HANDLES, `${path}.targetHandle`), label: string(edge.label, 4000, `${path}.label`), style: edgeStyle(edge.style, `${path}.style`), ...(waypoints === undefined ? {} : { waypoints }) };
   });
   const rawDrawings = doc.drawings === undefined ? [] : doc.drawings;
   if (!Array.isArray(rawDrawings) || rawDrawings.length > 1000) fail('diagram.drawings must be an array with at most 1,000 strokes.');

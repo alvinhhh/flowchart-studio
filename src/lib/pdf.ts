@@ -106,6 +106,32 @@ function labelImage(text: Element): SVGImageElement {
   }
 }
 
+/** svg2pdf scales markers by line width even when markerUnits is userSpaceOnUse. */
+function preparePdfMarkers(svg: Element): void {
+  const markers = new Map([...svg.querySelectorAll('marker')].map(marker => [marker.id, marker]));
+  const prepared = new Map<string, string>();
+  for (const path of svg.querySelectorAll('path[marker-start], path[marker-end]')) {
+    const strokeWidth = Number(path.getAttribute('stroke-width')) || 1;
+    for (const attribute of ['marker-start', 'marker-end']) {
+      const originalId = path.getAttribute(attribute)?.match(/^url\(#([^)]*)\)$/)?.[1];
+      const marker = originalId ? markers.get(originalId) : undefined;
+      if (!marker || marker.getAttribute('markerUnits') !== 'userSpaceOnUse') continue;
+      const key = `${originalId}:${strokeWidth}`;
+      let id = prepared.get(key);
+      if (!id) {
+        const normalized = marker.cloneNode(true) as Element;
+        id = `pdf-marker-${prepared.size}`;
+        normalized.id = id;
+        normalized.setAttribute('markerWidth', String(Number(marker.getAttribute('markerWidth')) / strokeWidth));
+        normalized.setAttribute('markerHeight', String(Number(marker.getAttribute('markerHeight')) / strokeWidth));
+        marker.parentNode!.appendChild(normalized);
+        prepared.set(key, id);
+      }
+      path.setAttribute(attribute, `url(#${id})`);
+    }
+  }
+}
+
 /** Convert the generated scene to PDF paths and embedded text, with local Unicode label fallback. */
 export async function svgToPdf(markup: string): Promise<Uint8Array<ArrayBuffer>> {
   const svg = new DOMParser().parseFromString(markup, 'image/svg+xml').documentElement;
@@ -137,6 +163,7 @@ export async function svgToPdf(markup: string): Promise<Uint8Array<ArrayBuffer>>
       for (const span of text.querySelectorAll('tspan')) span.textContent = (span.textContent ?? '').normalize('NFC');
     } else text.replaceWith(labelImage(text));
   }
+  preparePdfMarkers(svg);
   await svg2pdf(svg, pdf, { x: layout.imageX, y: layout.imageY,
     width: layout.imageWidth, height: layout.imageHeight,
     loadExternalStyleSheets: false, loadImages: /^data:image\/png;base64,/ });

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { handleRequest, MAX_CIPHERTEXT_BYTES, MAX_REQUEST_BYTES, SHARE_TTL_SECONDS, type ShareStore } from './sharing';
+import { readStats } from './metrics';
+import { testDatabase } from './test-database';
 
 const origin = 'https://flowchart.lol';
 const exampleId = 'a'.repeat(32);
@@ -31,6 +33,71 @@ function post(value: unknown = envelope, extra: RequestInit = {}, site = origin)
 afterEach(() => vi.useRealTimers());
 
 describe('encrypted shares', () => {
+  it('counts successful production shares without counting reads, rejected requests or failed KV writes', async () => {
+    const db = testDatabase();
+    try {
+      const kv = store();
+      const env = { SHARES: kv, METRICS: db };
+      const created = await handleRequest(post(), env);
+      expect(created.status).toBe(201);
+      const { id } = await created.json();
+      await handleRequest(new Request(`${origin}/api/shares/${id}`), env);
+      await handleRequest(post(null), env);
+      kv.put.mockRejectedValueOnce(new Error('KV failed'));
+      expect((await handleRequest(post(), env)).status).toBe(503);
+      expect(await readStats(db)).toMatchObject({ chartsShared: 1 });
+      // Preview sites must not change public production totals.
+      expect((await handleRequest(post(envelope, {}, 'https://preview.pages.dev'), env)).status).toBe(201);
+      expect(await readStats(db)).toMatchObject({ chartsShared: 1 });
+    } finally { db.close(); }
+  });
+
+  it('continues sharing when metrics storage fails and defers counting through waitUntil', async () => {
+    const db = testDatabase();
+    try {
+      const kv = store();
+      db.sqlite.exec('DROP TABLE metrics');
+      expect((await handleRequest(post(), { SHARES: kv, METRICS: db })).status).toBe(201);
+      expect(kv.records.size).toBe(1);
+      const tasks: Promise<unknown>[] = [];
+      const ctx = { waitUntil: (task: Promise<unknown>) => tasks.push(task) };
+      expect((await handleRequest(post(), { SHARES: kv, METRICS: db }, ctx)).status).toBe(201);
+      expect(tasks).toHaveLength(1);
+      await expect(tasks[0]).resolves.toBeUndefined();
+    } finally { db.close(); }
+  });
+
+  it('returns a created share while background counting is still pending', async () => {
+    const db = testDatabase();
+    try {
+      const originalBatch = db.batch.bind(db);
+      let finish: (() => void) | undefined;
+      vi.spyOn(db, 'batch').mockImplementationOnce(statements => new Promise(resolve => {
+        finish = () => { void originalBatch(statements).then(resolve); };
+      }));
+      const tasks: Promise<unknown>[] = [];
+      const response = await handleRequest(post(), { SHARES: store(), METRICS: db }, { waitUntil: task => tasks.push(task) });
+      expect(response.status).toBe(201);
+      expect(tasks).toHaveLength(1);
+      expect(await readStats(db)).toMatchObject({ chartsShared: 0 });
+      finish!();
+      await tasks[0];
+      expect(await readStats(db)).toMatchObject({ chartsShared: 1 });
+    } finally { db.close(); }
+  });
+
+  it('routes the public statistics and event APIs through the Pages worker', async () => {
+    const db = testDatabase();
+    try {
+      const eventRequest = new Request(`${origin}/api/metrics`, {
+        method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'visit', id: crypto.randomUUID(), day: new Date().toISOString().slice(0, 10) }),
+      });
+      expect((await handleRequest(eventRequest, { METRICS: db })).status).toBe(204);
+      const response = await handleRequest(new Request(`${origin}/api/stats`), { METRICS: db });
+      expect(await response.json()).toMatchObject({ visitors: 1 });
+    } finally { db.close(); }
+  });
   it('stores opaque ciphertext with a random ID and a 24-hour TTL, and retrieves a decryptable snapshot', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-02T12:00:00.250Z'));

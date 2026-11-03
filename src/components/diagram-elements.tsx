@@ -1,7 +1,8 @@
 'use client';
 import { LockKeyhole } from 'lucide-react';
-import { memo, useCallback, useLayoutEffect } from 'react';
+import { memo, useCallback, useLayoutEffect, useId } from 'react';
 import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizeControl, Position, useUpdateNodeInternals, type EdgeProps, type Node, type NodeProps, type ResizeParams } from '@xyflow/react';
+import { edgeDashArray, edgeMarkerId, edgeMarkersMarkup, resolveEdgeStyle } from '@/lib/connectors';
 import type { DiagramEdge, DiagramNode, HandleId } from '@/lib/diagram';
 import { colorValues, edgeRoute, nodePath, nodeTextBox, handlePoint, wrapLabel, labelWidth } from '@/lib/geometry';
 
@@ -41,13 +42,19 @@ export const ShapeNode = memo(function ShapeNode({ data, selected }: NodeProps<F
 export function RoutedEdge(props: EdgeProps) {
   const data = props.data as { model: DiagramEdge } | undefined;
   const model = data?.model;
+  const markerPrefix = `edge-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}-`;
+  const edgeStyle = resolveEdgeStyle(model?.style);
   const route = edgeRoute({ x: props.sourceX, y: props.sourceY }, { x: props.targetX, y: props.targetY }, model?.sourceHandle ?? 'bottom', model?.targetHandle ?? 'top');
   const colors = colorValues(model?.style.color ?? 'neutral');
   const label = model?.label ?? '';
   const lines = wrapLabel(label, 220);
   const width = Math.max(20, ...lines.map(line => labelWidth(line))) + 20;
   return <>
-    <BaseEdge id={props.id} path={route.path} markerEnd={props.markerEnd} interactionWidth={24} style={{ stroke: props.selected ? '#171717' : colors.stroke, strokeWidth: props.selected ? 2.5 : 1.5 }} />
+    <defs dangerouslySetInnerHTML={{ __html: edgeMarkersMarkup(model?.style, markerPrefix) }} />
+    <BaseEdge id={props.id} path={route.path}
+      markerStart={edgeStyle.startMarker === 'none' ? undefined : `url(#${edgeMarkerId(edgeStyle.startMarker, edgeStyle.color, edgeStyle.width, markerPrefix)})`}
+      markerEnd={edgeStyle.endMarker === 'none' ? undefined : `url(#${edgeMarkerId(edgeStyle.endMarker, edgeStyle.color, edgeStyle.width, markerPrefix)})`}
+      interactionWidth={24} style={{ stroke: colors.stroke, strokeWidth: edgeStyle.width, strokeDasharray: edgeDashArray(model?.style), strokeLinecap: 'round', strokeLinejoin: 'round' }} />
     {label && <EdgeLabelRenderer><div className="edge-label nodrag nopan" style={{ transform: `translate(-50%, -50%) translate(${route.labelX}px, ${route.labelY}px)`, width }} aria-hidden="true">{lines.map((line, i) => <div key={i}>{line || '\u00a0'}</div>)}</div></EdgeLabelRenderer>}
   </>;
 }

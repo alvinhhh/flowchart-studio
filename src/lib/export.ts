@@ -1,4 +1,5 @@
 import type { Diagram, DiagramNode } from './diagram';
+import { edgeDashArray, edgeMarkerId, markerMarkup, resolveEdgeStyle } from './connectors';
 import { drawingBounds, drawingPath } from './drawing';
 import { routeDiagramEdge } from './routing';
 import { colorValues, labelWidth, nodePath, nodeTextBox, wrapLabel } from './geometry';
@@ -92,8 +93,14 @@ function textMarkup(lines: string[], x: number, y: number, color: string): strin
 function renderSvg(diagram: Diagram): string {
   const content = scene(diagram);
   const bounds = boundsForScene(content);
-  const names = ['neutral', 'blue', 'amber', 'rose', 'violet'] as const;
-  const markers = names.map(name => `<marker id="arrow-${name}" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse" viewBox="0 0 10 10"><path d="M 0 0 L 10 5 L 0 10 Z" fill="${colorValues(name).stroke}"/></marker>`).join('');
+  const definitions = new Map<string, string>();
+  for (const { edge } of content.edges) {
+    const style = resolveEdgeStyle(edge.style);
+    for (const marker of [style.startMarker, style.endMarker]) if (marker !== 'none') {
+      definitions.set(edgeMarkerId(marker, style.color, style.width), markerMarkup(marker, style.color, style.width));
+    }
+  }
+  const markers = [...definitions.values()].join('');
   const drawings = content.drawings.map(stroke => `<path data-drawing-id="${xml(stroke.id)}" d="${drawingPath(stroke)}" fill="${stroke.color === 'neutral' ? '#242424' : colorValues(stroke.color).stroke}"/>`).join('');
   const background = diagram.settings.background ?? (diagram.settings.gridVisible ? 'dots' : 'blank');
   const backgroundPatterns = background === 'dots'
@@ -102,8 +109,13 @@ function renderSvg(diagram: Diagram): string {
   const backgroundRect = background === 'blank' ? '' : `<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="url(#background-${background})"/>`;
   const edges = content.edges.map(({ edge, route }) => {
     const color = colorValues(edge.style.color);
-    const marker = names.includes(edge.style.color) ? edge.style.color : 'neutral';
-    return `<path d="${route.path}" fill="none" stroke="${color.stroke}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-${marker})"/>`;
+    const style = resolveEdgeStyle(edge.style);
+    const dash = edgeDashArray(edge.style);
+    const marker = (end: 'start' | 'end') => {
+      const value = end === 'start' ? style.startMarker : style.endMarker;
+      return value === 'none' ? '' : ` marker-${end}="url(#${edgeMarkerId(value, style.color, style.width)})"`;
+    };
+    return `<path data-edge-id="${xml(edge.id)}" d="${route.path}" fill="none" stroke="${color.stroke}" stroke-width="${style.width}" stroke-linejoin="round" stroke-linecap="round"${dash === undefined ? '' : ` stroke-dasharray="${dash}"`}${marker('start')}${marker('end')}/>`;
   }).join('');
   const nodes = content.nodes.map(node => {
     const color = colorValues(node.style.color);

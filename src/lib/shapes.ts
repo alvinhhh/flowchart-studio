@@ -5,10 +5,12 @@ export const NODE_TYPES = [
   'card', 'paper_tape', 'summing_junction', 'or', 'collate', 'sort', 'extract',
   'merge', 'stored_data', 'delay', 'sequential_data', 'database', 'direct_data',
   'display', 'annotation', 'loop_limit', 'parallel',
+  'octagon', 'star', 'cloud', 'cross', 'speech_bubble',
+  'arrow_right', 'arrow_left', 'arrow_up', 'arrow_down', 'arrow_horizontal', 'arrow_vertical', 'chevron',
 ] as const;
 
 export type NodeKind = (typeof NODE_TYPES)[number];
-export type ShapeGroup = 'Basic' | 'Process' | 'Data' | 'Routing';
+export type ShapeGroup = 'Basic' | 'Process' | 'Data' | 'Routing' | 'Geometry' | 'Block arrows';
 export interface NodeDefinition {
   label: string;
   group: ShapeGroup;
@@ -25,6 +27,9 @@ export const NODE_TYPE_LABELS: Record<NodeKind, string> = {
   card: 'Card', paper_tape: 'Paper tape', summing_junction: 'Summing junction', or: 'Or junction', collate: 'Collate', sort: 'Sort', extract: 'Extract',
   merge: 'Merge', stored_data: 'Stored data', delay: 'Delay', sequential_data: 'Sequential data', database: 'Database', direct_data: 'Direct-access data',
   display: 'Display', annotation: 'Annotation', loop_limit: 'Loop limit', parallel: 'Parallel mode',
+  octagon: 'Octagon', star: 'Star', cloud: 'Cloud', cross: 'Cross', speech_bubble: 'Speech bubble',
+  arrow_right: 'Right arrow', arrow_left: 'Left arrow', arrow_up: 'Up arrow', arrow_down: 'Down arrow',
+  arrow_horizontal: 'Left-right arrow', arrow_vertical: 'Up-down arrow', chevron: 'Chevron',
 };
 
 function definition(kind: NodeKind, group: ShapeGroup, width: number, height: number, keywords: string, defaultLabel?: string): NodeDefinition {
@@ -64,4 +69,16 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
   annotation: definition('annotation', 'Data', 200, 112, 'annotation comment explanation bracket'),
   loop_limit: definition('loop_limit', 'Process', 184, 104, 'loop limit loop boundary repeat iteration'),
   parallel: definition('parallel', 'Routing', 192, 96, 'parallel mode concurrent fork join synchronization'),
+  octagon: definition('octagon', 'Geometry', 160, 144, 'octagon eight sided polygon stop'),
+  star: definition('star', 'Geometry', 160, 152, 'star five pointed priority highlight'),
+  cloud: definition('cloud', 'Geometry', 200, 128, 'cloud network internet external service'),
+  cross: definition('cross', 'Geometry', 148, 148, 'cross plus addition medical'),
+  speech_bubble: definition('speech_bubble', 'Geometry', 200, 136, 'speech bubble callout chat comment conversation', 'Callout'),
+  arrow_right: definition('arrow_right', 'Block arrows', 192, 104, 'right arrow block forward next direction'),
+  arrow_left: definition('arrow_left', 'Block arrows', 192, 104, 'left arrow block back previous direction'),
+  arrow_up: definition('arrow_up', 'Block arrows', 128, 184, 'up arrow block north direction'),
+  arrow_down: definition('arrow_down', 'Block arrows', 128, 184, 'down arrow block south direction'),
+  arrow_horizontal: definition('arrow_horizontal', 'Block arrows', 208, 112, 'left right arrow block horizontal bidirectional both double', 'Both ways'),
+  arrow_vertical: definition('arrow_vertical', 'Block arrows', 128, 192, 'up down arrow block vertical bidirectional both double', 'Both ways'),
+  chevron: definition('chevron', 'Block arrows', 192, 112, 'chevron arrow block step progress direction'),
 };

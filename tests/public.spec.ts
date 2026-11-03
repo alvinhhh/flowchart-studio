@@ -1,3 +1,4 @@
+import { NODE_TYPES, NODE_DEFINITIONS } from '../src/lib/shapes';
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { readFile } from 'node:fs/promises';
@@ -78,7 +79,7 @@ test('server HTML explains the free editor and exposes canonical metadata withou
     await expect(freeAnswer).toContainText(/free/i);
     await expect(freeAnswer).toContainText(/no account/i);
     await expect(freeAnswer).toContainText(/no[^.]*ads|without ads/i);
-    await expect(freeAnswer).toContainText(/no[^.]*analytics|without analytics/i);
+    await expect(freeAnswer).toContainText('Basic usage counts');
     const canonical = await page.locator('link[rel="canonical"]').getAttribute('href');
     expect(canonical).toBeTruthy();
     const canonicalURL = new URL(canonical!);
@@ -179,7 +180,7 @@ test('public pages and guides have no serious accessibility violations, and guid
   expect(browserErrors).toEqual([]);
 });
 
-test('editing, local saving, and JSON export transmit no diagram content or HTTP requests', async ({ page }) => {
+test('editing, local saving, and JSON export transmit no diagram content', async ({ page }) => {
   await page.goto('/app');
   await expect(page.getByRole('textbox', { name: 'Diagram title', exact: true })).toBeVisible();
   await expect(page.getByRole('status').filter({ hasText: 'Saved on this device' })).toBeVisible();
@@ -201,7 +202,13 @@ test('editing, local saving, and JSON export transmit no diagram content or HTTP
   expect(downloaded.nodes.some(node => node.label === secret)).toBe(true);
   await page.waitForTimeout(750);
   expect(requests.filter(request => `${request.url} ${request.body ?? ''}`.includes(secret))).toEqual([]);
-  expect(requests).toEqual([]);
+  for (const request of requests) {
+    expect(new URL(request.url).pathname).toBe('/api/metrics');
+    expect(request.method).toBe('POST');
+    const event = JSON.parse(request.body!);
+    expect(Object.keys(event).sort()).toEqual(['day', 'id', 'type']);
+    expect(event.type).toBe('chart_created');
+  }
   expect(sockets).toEqual([]);
 });
 
@@ -215,7 +222,7 @@ test('a narrow editor has usable Shapes, closable Properties, and a keyboard-clo
   await expect(shapes).toHaveAttribute('aria-expanded', 'true');
   const palette = page.getByRole('complementary', { name: 'Shapes', exact: true });
   await expect(palette).toBeVisible();
-  await expect(palette.getByRole('button', { name: /^Add / })).toHaveCount(32);
+  await expect(palette.getByRole('button', { name: /^Add / })).toHaveCount(NODE_TYPES.filter(kind => NODE_DEFINITIONS[kind].group === 'Basic').length);
   await palette.getByRole('button', { name: 'Add Process', exact: true }).click();
   const properties = page.getByRole('complementary', { name: 'Properties', exact: true });
   await expect(properties).toBeVisible();
@@ -223,10 +230,10 @@ test('a narrow editor has usable Shapes, closable Properties, and a keyboard-clo
   await properties.getByRole('button', { name: 'Clear selection', exact: true }).click();
   await expect(properties).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
-  const helpTrigger = page.getByRole('button', { name: 'Help', exact: true });
+  const helpTrigger = page.getByRole('button', { name: 'Local storage & help', exact: true });
   await helpTrigger.focus();
   await helpTrigger.press('Enter');
-  const help = page.getByRole('dialog', { name: 'Help', exact: true });
+  const help = page.getByRole('dialog', { name: 'Local storage & help', exact: true });
   await expect(help).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(help).toHaveCount(0);

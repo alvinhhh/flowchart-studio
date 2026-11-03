@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { NODE_TYPES } from '../src/lib/shapes';
+
+const SHAPE_GROUP_LABELS = ['Basic shapes', 'Process shapes', 'Data shapes', 'Routing shapes', 'Geometry shapes', 'Block arrows shapes'];
 
 type Shape = { id: string; type: string; position: { x: number; y: number }; width: number; height: number; label: string; notes: string; style: { color: string } };
 type Diagram = { title: string; nodes: Shape[]; drawings: unknown[]; edges: unknown[]; settings: { background: string } };
@@ -27,15 +30,57 @@ async function blank(page: Page, title: string) {
   await expect.poll(async () => !!await saved(page, title)).toBe(true);
 }
 
-test('all 32 categorized shapes are searchable, addable, portable, and retain their dimensions after auto arrange', async ({ page, browser }) => {
+async function expandGroups(page: Page, groups = SHAPE_GROUP_LABELS) {
+  for (const name of groups) {
+    const toggle = page.getByRole('button', { name, exact: true });
+    await expect(toggle).toBeVisible();
+    if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  }
+}
+
+test('shape categories start compact, expand and collapse, and search reveals collapsed shapes', async ({ page }) => {
+  await blank(page, 'Shape categories');
+  const options = page.getByRole('button', { name: /^Add / });
+  await expect(page.getByRole('button', { name: 'Basic shapes', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(options).toHaveCount(6);
+  for (const name of SHAPE_GROUP_LABELS.slice(1)) await expect(page.getByRole('button', { name, exact: true })).toHaveAttribute('aria-expanded', 'false');
+  const geometry = page.getByRole('button', { name: 'Geometry shapes', exact: true });
+  await geometry.click();
+  await expect(geometry).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'Add Octagon', exact: true })).toBeVisible();
+  await expect(options).toHaveCount(11);
+  await geometry.click();
+  await expect(geometry).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('button', { name: 'Add Octagon', exact: true })).toBeHidden();
+  const search = page.getByLabel('Search shapes', { exact: true });
+  await search.fill('bidirectional');
+  const arrows = page.getByRole('button', { name: 'Block arrows shapes', exact: true });
+  await expect(arrows).toHaveAttribute('aria-expanded', 'true');
+  await expect(options).toHaveCount(2);
+  await expect(page.getByRole('button', { name: 'Add Left-right arrow', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Add Up-down arrow', exact: true })).toBeVisible();
+  await search.clear();
+  await expect(arrows).toHaveAttribute('aria-expanded', 'false');
+  await expect(options).toHaveCount(6);
+  await arrows.focus();
+  await arrows.press('Enter');
+  await expect(arrows).toHaveAttribute('aria-expanded', 'true');
+  await expect(options).toHaveCount(13);
+  await arrows.press('Enter');
+  await expect(arrows).toHaveAttribute('aria-expanded', 'false');
+  await expect(options).toHaveCount(6);
+});
+
+test('all categorized shapes are searchable, addable, portable, and retain their dimensions after auto arrange', async ({ page, browser }) => {
   test.setTimeout(60_000);
   const title = 'Complete shape library';
   await blank(page, title);
-  for (const group of ['Basic shapes', 'Process shapes', 'Data shapes', 'Routing shapes']) await expect(page.getByRole('region', { name: group, exact: true })).toBeVisible();
+  await expandGroups(page);
   const options = page.getByRole('button', { name: /^Add / });
-  await expect(options).toHaveCount(32);
+  await expect(options).toHaveCount(NODE_TYPES.length);
   const labels = await options.evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')!));
-  expect(new Set(labels).size).toBe(32);
+  expect(new Set(labels).size).toBe(NODE_TYPES.length);
   const search = page.getByLabel('Search shapes', { exact: true });
   for (const label of labels) {
     await search.fill(label.replace(/^Add /, ''));
@@ -44,10 +89,10 @@ test('all 32 categorized shapes are searchable, addable, portable, and retain th
   await search.fill('no-such-shape-123');
   await expect(options).toHaveCount(0);
   await search.clear();
-  await expect(options).toHaveCount(32);
-  await expect.poll(async () => (await saved(page, title))?.nodes.length).toBe(32);
+  await expect(options).toHaveCount(NODE_TYPES.length);
+  await expect.poll(async () => (await saved(page, title))?.nodes.length).toBe(NODE_TYPES.length);
   const before = (await saved(page, title))!;
-  expect(new Set(before.nodes.map(node => node.type)).size).toBe(32);
+  expect(new Set(before.nodes.map(node => node.type)).size).toBe(NODE_TYPES.length);
   await page.getByRole('button', { name: 'Auto arrange', exact: true }).click();
   await expect(page.locator('.footer-notice')).toContainText(/arranged/i);
   await expect(page.getByRole('status')).toContainText('Saved');
@@ -67,9 +112,9 @@ test('all 32 categorized shapes are searchable, addable, portable, and retain th
   const context = await browser.newContext();
   try {
     const fresh = await context.newPage();
-    await fresh.goto('http://127.0.0.1:3000/app');
+    await fresh.goto(new URL('/app', page.url()).href);
     await fresh.locator('input[type="file"]').setInputFiles({ name: 'all-shapes.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(json)) });
-    await expect.poll(async () => (await saved(fresh, title))?.nodes.length).toBe(32);
+    await expect.poll(async () => (await saved(fresh, title))?.nodes.length).toBe(NODE_TYPES.length);
     expect((await saved(fresh, title))!.nodes).toEqual(arranged.nodes);
   } finally { await context.close(); }
 });
@@ -102,6 +147,7 @@ test('irregular shapes preview their actual outline at canvas zoom and drop with
   await page.locator('input[type="file"]').setInputFiles({ name: 'previews.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(fixture)) });
   await expect(page.getByRole('textbox', { name: 'Diagram title', exact: true })).toHaveValue(title);
   await expect.poll(async () => !!await saved(page, title)).toBe(true);
+  await expandGroups(page, ['Data shapes']);
   const labels = await page.getByRole('button', { name: /^Add / }).evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')!));
   const representatives = ['Add Document', 'Add Paper tape', 'Add Database'];
   for (const label of representatives) expect(labels).toContain(label);
