@@ -429,7 +429,7 @@ function Workspace() {
   const exportJSON = () => { const d = store.current.current?.present; if (d) { downloadJson(d); setNotice('JSON backup downloaded.'); } };
   const exportSVG = () => { if (doc) { try { downloadSvg(doc); setNotice('SVG downloaded.'); } catch (error) { store.setError(error instanceof Error ? error.message : 'SVG export failed.'); } } };
   const exportPDF = async () => { if (!doc) return; setExporting(true); try { await downloadPdf(doc); setNotice('PDF downloaded.'); } catch (error) { store.setError(error instanceof Error ? error.message : 'PDF export failed.'); } finally { setExporting(false); } };
-  const exportPNG = async () => { if (!doc) return; setExporting(true); try { await downloadPng(doc); setNotice('PNG downloaded.'); } catch (e) { store.setError(e instanceof Error ? e.message : 'PNG export failed. JSON download remains available.'); } finally { setExporting(false); } };
+  const exportPNG = async () => { if (!doc) return; setExporting(true); setNotice('Exporting PNG…'); try { const result = await downloadPng(doc); setNotice(`PNG downloaded (${result.width} × ${result.height}).${result.limited ? ' Size limited; use SVG or PDF for full vector detail.' : ''}`); } catch (e) { setNotice(''); store.setError(e instanceof Error ? e.message : 'PNG export failed. JSON download remains available.'); } finally { setExporting(false); } };
   const importFile = async (selected?: File) => {
     if (!selected) return;
     try {

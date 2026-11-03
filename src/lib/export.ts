@@ -6,8 +6,6 @@ import { colorValues, labelWidth, nodePath, nodeTextBox, wrapLabel } from './geo
 const FONT_SIZE = 14;
 const LINE_HEIGHT = 20;
 const PADDING = 48;
-const MAX_DIMENSION = 8192;
-const MAX_PIXELS = 16_000_000;
 
 export type ExportBounds = { x: number; y: number; width: number; height: number };
 
@@ -91,7 +89,7 @@ function textMarkup(lines: string[], x: number, y: number, color: string): strin
   return `<text text-anchor="middle" fill="${color}" font-size="${FONT_SIZE}" font-weight="500">${lines.map((line, index) => `<tspan x="${x}" y="${firstY + index * LINE_HEIGHT}">${xml(line)}</tspan>`).join('')}</text>`;
 }
 
-function renderSvg(diagram: Diagram, rasterSize?: { width: number; height: number }): string {
+function renderSvg(diagram: Diagram): string {
   const content = scene(diagram);
   const bounds = boundsForScene(content);
   const names = ['neutral', 'blue', 'amber', 'rose', 'violet'] as const;
@@ -118,7 +116,7 @@ function renderSvg(diagram: Diagram, rasterSize?: { width: number; height: numbe
     const height = lines.length * LINE_HEIGHT + 10;
     return `<g><rect x="${route.labelX - width / 2}" y="${route.labelY - height / 2}" width="${width}" height="${height}" rx="6" fill="#ffffff"/>${textMarkup(lines, route.labelX, route.labelY, '#334155')}</g>`;
   }).join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${rasterSize?.width ?? bounds.width}" height="${rasterSize?.height ?? bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"><defs>${markers}${backgroundPatterns}</defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="#ffffff"/>${backgroundRect}${drawings}${edges}${nodes}${labels}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"><defs>${markers}${backgroundPatterns}</defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="#ffffff"/>${backgroundRect}${drawings}${edges}${nodes}${labels}</svg>`;
 }
 
 /** Self-contained vector SVG for downloads and raster rendering; contains no HTML. */
@@ -155,19 +153,18 @@ export function downloadSvg(diagram: Diagram): void {
   download(new Blob([diagramToSvg(diagram)], { type: 'image/svg+xml;charset=utf-8' }), filename(diagram.title, 'svg'));
 }
 
-export async function downloadPng(diagram: Diagram): Promise<void> {
-  const bounds = exportBounds(diagram);
-  if (Math.max(bounds.width, bounds.height) > 5_000_000 || !Number.isFinite(bounds.width * bounds.height)) {
-    throw new Error('This diagram is too spread out to export as PNG. Move the shapes closer together, or export JSON.');
-  }
-  const scale = Math.min(2, MAX_DIMENSION / bounds.width, MAX_DIMENSION / bounds.height, Math.sqrt(MAX_PIXELS / (bounds.width * bounds.height)));
-  if (scale < 0.02) {
-    throw new Error('This diagram is too spread out for a readable PNG. Move the shapes closer together, or export JSON.');
-  }
-  const width = Math.max(1, Math.floor(bounds.width * scale));
-  const height = Math.max(1, Math.floor(bounds.height * scale));
-  const blob = await rasterize(diagram, width, height, 'PNG');
+export async function downloadPng(diagram: Diagram): Promise<{ width: number; height: number; limited: boolean }> {
+  const { pngLayout, encodePng } = await import('./png');
+  const svg = diagramToSvg(diagram);
+  if (svg.length > 16_000_000) throw new Error('This diagram is too large to render as PNG. Export SVG or PDF instead.');
+  const root = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
+  const [x, y, width, height] = root.getAttribute('viewBox')!.split(' ').map(Number);
+  const layout = pngLayout(width, height);
+  await document.fonts.ready;
+  const bands = rasterBands(root, { x, y, width, height }, layout);
+  const blob = await encodePng(layout.width, layout.height, bands, layout.scale * 96 / 0.0254);
   download(blob, filename(diagram.title, 'png'));
+  return layout;
 }
 
 /** Vector geometry and embedded text on a page sized to the complete diagram. */
@@ -177,33 +174,53 @@ export async function downloadPdf(diagram: Diagram): Promise<void> {
   download(new Blob([bytes], { type: 'application/pdf' }), filename(diagram.title, 'pdf'));
 }
 
-async function rasterize(diagram: Diagram, width: number, height: number, format: 'PNG'): Promise<Blob> {
-  if (width > MAX_DIMENSION || height > MAX_DIMENSION || width * height > MAX_PIXELS) {
-    throw new Error(`This diagram is too large to render as ${format}. Try exporting SVG.`);
-  }
-  const svg = renderSvg(diagram, { width, height });
-  if (svg.length > 16_000_000) throw new Error(`This diagram is too large to render as ${format}. Export SVG or JSON to preserve the complete diagram.`);
-  const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+/** Rasterize overlapping tiles so even large exports use a small browser canvas. */
+async function* rasterBands(root: Element, bounds: ExportBounds, layout: { width: number; height: number; scale: number }): AsyncGenerator<Uint8Array> {
+  const TILE_WIDTH = 2048, BAND_HEIGHT = 128, BLEED = 2;
   const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('The browser could not create a PNG canvas. Try exporting SVG or PDF.');
   try {
-    const image = new Image();
-    image.decoding = 'async';
-    await new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(() => { image.onload = null; image.onerror = null; reject(new Error(`${format} rendering timed out. Try again, or export SVG.`)); }, 20_000);
-      image.onload = () => { window.clearTimeout(timeout); resolve(); };
-      image.onerror = () => { window.clearTimeout(timeout); reject(new Error(`The browser could not render this ${format}. Try exporting SVG.`)); };
-      image.src = url;
-    });
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error(`The browser could not create a ${format} canvas. Try exporting SVG.`);
-    context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, width, height);
-    context.drawImage(image, 0, 0, width, height);
-    return await new Promise<Blob>((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error(`The browser could not finish the ${format}. Try exporting SVG.`)), 'image/png'));
+    for (let top = 0; top < layout.height; top += BAND_HEIGHT) {
+      const rows = Math.min(BAND_HEIGHT, layout.height - top);
+      const band = new Uint8Array(layout.width * rows * 3);
+      for (let left = 0; left < layout.width; left += TILE_WIDTH) {
+        const columns = Math.min(TILE_WIDTH, layout.width - left);
+        canvas.width = columns + BLEED * 2;
+        canvas.height = rows + BLEED * 2;
+        root.setAttribute('width', String(canvas.width));
+        root.setAttribute('height', String(canvas.height));
+        root.setAttribute('viewBox', [bounds.x + (left - BLEED) / layout.scale,
+          bounds.y + (top - BLEED) / layout.scale, canvas.width / layout.scale,
+          canvas.height / layout.scale].join(' '));
+        const url = URL.createObjectURL(new Blob([root.outerHTML], { type: 'image/svg+xml;charset=utf-8' }));
+        const image = new Image();
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const timeout = window.setTimeout(() => { image.onload = null; image.onerror = null; reject(new Error('PNG rendering timed out. Try exporting SVG or PDF.')); }, 20_000);
+            image.onload = () => { window.clearTimeout(timeout); resolve(); };
+            image.onerror = () => { window.clearTimeout(timeout); reject(new Error('The browser could not render this PNG. Try exporting SVG or PDF.')); };
+            image.src = url;
+          });
+          context.fillStyle = '#ffffff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(image, 0, 0);
+          const rgba = context.getImageData(BLEED, BLEED, columns, rows).data;
+          for (let row = 0; row < rows; row++) {
+            let output = (row * layout.width + left) * 3;
+            for (let input = row * columns * 4, end = input + columns * 4; input < end; input += 4) {
+              band[output++] = rgba[input]; band[output++] = rgba[input + 1]; band[output++] = rgba[input + 2];
+            }
+          }
+        } finally {
+          image.onload = null; image.onerror = null;
+          image.removeAttribute('src');
+          URL.revokeObjectURL(url);
+        }
+      }
+      yield band;
+    }
   } finally {
-    URL.revokeObjectURL(url);
     canvas.width = 0;
     canvas.height = 0;
   }

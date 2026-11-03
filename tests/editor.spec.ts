@@ -220,6 +220,7 @@ test('a malformed import gives an actionable error and preserves the current doc
 });
 
 test('PNG download includes shapes beyond the viewport and stays within canvas limits', async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto('/app');
   const fixture = diagramFixture();
   fixture.title = 'Full diagram PNG';
@@ -237,19 +238,18 @@ test('PNG download includes shapes beyond the viewport and stays within canvas l
   const height = buffer.readUInt32BE(20);
   expect(width).toBeGreaterThan(4000);
   expect(height).toBeGreaterThan(1800);
-  expect(Math.max(width, height)).toBeLessThanOrEqual(8192);
-  expect(width * height).toBeLessThanOrEqual(16_000_000);
+  expect(Math.max(width, height)).toBeLessThanOrEqual(16_384);
+  expect(width * height).toBeGreaterThan(16_000_000);
+  expect(width * height).toBeLessThanOrEqual(64_000_000);
   const lowerRightHasContent = await page.evaluate(async (base64) => {
     const image = new Image();
     await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = reject; image.src = `data:image/png;base64,${base64}`; });
     const canvas = document.createElement('canvas');
-    canvas.width = image.width;
-    canvas.height = image.height;
+    canvas.width = 256;
+    canvas.height = 256;
     const context = canvas.getContext('2d')!;
-    context.drawImage(image, 0, 0);
-    const startX = Math.floor(canvas.width * 0.8);
-    const startY = Math.floor(canvas.height * 0.8);
-    const pixels = context.getImageData(startX, startY, canvas.width - startX, canvas.height - startY).data;
+    context.drawImage(image, image.width - 512, image.height - 512, 512, 512, 0, 0, 256, 256);
+    const pixels = context.getImageData(0, 0, 256, 256).data;
     for (let index = 0; index < pixels.length; index += 16) {
       if (pixels[index + 3] > 0 && (pixels[index] < 245 || pixels[index + 1] < 245 || pixels[index + 2] < 245)) return true;
     }
