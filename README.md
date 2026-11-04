@@ -2,7 +2,7 @@
 
 A free flowchart editor that runs in your browser. No account or ads.
 
-[Open Flowchart Studio](https://flowchart.lol/app) · [Source on GitHub](https://github.com/alvinhhh/flowchart-studio)
+[Open Flowchart Studio](https://flowchart.lol/app)
 
 ## Features
 
